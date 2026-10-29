@@ -1,9 +1,9 @@
 name: SCC PocketBase Android debug APK (private test)
 
 on:
-  push:
-    branches:
-      - codex/scc-vps-production-foundation-20261029
+  # Manual only: the optimized test build handles private device QA.
+  # Avoid running the large 400MB debug compilation on every code commit.
+  workflow_dispatch:
 
 permissions:
   contents: read
