@@ -231,4 +231,67 @@ void main() {
     api.close();
   });
 
+
+  test('private image preview uses a short-lived user-scoped file token',
+      () async {
+    final store = MemorySccTokenStore()..token = 'regular-user-token';
+    final operations = <String>[];
+    final api = SccPocketBaseClient(
+      baseUrl: 'https://creator-api.indexesstore.com',
+      tokenStore: store,
+      httpClient: MockClient((request) async {
+        operations.add(request.method + ' ' + request.url.path);
+        if (request.method == 'POST') {
+          expect(request.url.path, '/api/files/token');
+          expect(request.headers['authorization'], 'regular-user-token');
+          return http.Response('{"token":"temporary-media-token"}', 200);
+        }
+        expect(request.method, 'GET');
+        expect(request.url.path,
+            '/api/files/media_assets/asset-one/owner-only.png');
+        expect(request.url.queryParameters['token'],
+            'temporary-media-token');
+        expect(request.headers['cache-control'], 'no-store');
+        return http.Response.bytes(
+          <int>[137, 80, 78, 71, 13, 10, 26, 10],
+          200,
+          headers: {'content-type': 'image/png'},
+        );
+      }),
+    );
+    final bytes = await api.downloadPrivateImage(const SccMediaAsset(
+      id: 'asset-one',
+      owner: 'user-one',
+      filename: 'owner-only.png',
+      label: 'صورة خاصة',
+    ));
+    expect(bytes.length, 8);
+    expect(operations, [
+      'POST /api/files/token',
+      'GET /api/files/media_assets/asset-one/owner-only.png',
+    ]);
+    api.close();
+  });
+
+  test('private preview refuses videos before requesting file tokens',
+      () async {
+    final api = SccPocketBaseClient(
+      baseUrl: 'https://creator-api.indexesstore.com',
+      tokenStore: MemorySccTokenStore(),
+      httpClient: MockClient((req) async {
+        fail('Video preview must be refused locally');
+      }),
+    );
+    await expectLater(
+      api.downloadPrivateImage(const SccMediaAsset(
+        id: 'asset-video',
+        owner: 'user-one',
+        filename: 'private-video.mp4',
+        label: 'فيديو خاص',
+      )),
+      throwsArgumentError,
+    );
+    api.close();
+  });
+
 }
