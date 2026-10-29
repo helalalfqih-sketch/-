@@ -1,0 +1,27 @@
+name: SCC PocketBase Flutter client tests
+
+on:
+  push:
+    branches:
+      - codex/scc-vps-production-foundation-20261029
+  pull_request:
+    branches:
+      - shorebird-test
+
+permissions:
+  contents: read
+
+jobs:
+  auth-and-product-client:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Resolve Flutter dependencies
+        run: flutter pub get
+      - name: Test PocketBase client with injected HTTP mocks
+        run: flutter test test/services/scc_pocketbase_client_test.dart
