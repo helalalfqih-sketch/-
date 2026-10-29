@@ -23,5 +23,9 @@ jobs:
           cache: true
       - name: Resolve Flutter dependencies
         run: flutter pub get
-      - name: Test PocketBase client with injected HTTP mocks
-        run: flutter test test/services/scc_pocketbase_client_test.dart
+      - name: Analyze PocketBase Flutter entrypoint and client
+        run: |
+          dart analyze lib/scc_pocketbase_app.dart lib/services/pocketbase/scc_pocketbase_client.dart
+      - name: Test PocketBase client and live UI flows using mocks
+        run: |
+          flutter test test/services/scc_pocketbase_client_test.dart test/widgets/scc_pocketbase_app_test.dart
