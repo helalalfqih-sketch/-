@@ -1,0 +1,61 @@
+name: SCC PocketBase production config validation
+
+on:
+  push:
+    branches:
+      - codex/scc-vps-production-foundation-20261029
+  pull_request:
+    branches:
+      - shorebird-test
+
+permissions:
+  contents: read
+
+jobs:
+  validate-only-no-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify artifact tooling syntax
+        run: |
+          python3 -m py_compile deploy/vpsdime-scc/verify_release_zip.py
+          python3 -m json.tool deploy/vpsdime-scc/schema-contract.json > /dev/null
+      - name: Parse Docker Compose without building or starting
+        env:
+          ALPINE_IMAGE: 'alpine@sha256:0000000000000000000000000000000000000000000000000000000000000000'
+          POCKETBASE_VERSION: 'ci-parse-only'
+        run: |
+          docker compose -f deploy/vpsdime-scc/compose.yml config --format json > /tmp/scc-compose.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          c = json.loads(Path('/tmp/scc-compose.json').read_text())
+          p = c['services']['pocketbase']
+          assert not p.get('ports'), 'Host ports must remain private'
+          assert p['read_only'] is True, 'Read-only filesystem required'
+          assert 'ALL' in p['cap_drop'], 'Drop all capabilities'
+          assert p['security_opt'] == ['no-new-privileges:true']
+          assert c['networks']['wa']['external'] is True
+          assert any(x['target'] == '/pb_data' for x in p['volumes'])
+          print('Safe Compose shape: OK (NO DEPLOYMENT)')
+          PY
+      - name: Guard the existing WAHA and admin routes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          f = Path('deploy/vpsdime-scc/creator-api.Caddyfile').read_text()
+          assert 'creator-api.indexesstore.com {' in f
+          assert 'reverse_proxy scc-pocketbase:8090' in f
+          assert '/api/collections/_superusers/*' in f
+          assert 'respond @private_admin' in f
+          assert 'reverse_proxy 127.0.0.1' not in f
+          print('Caddy fragment checks: OK (not applied to running Caddy)')
+          PY
+      - name: Ensure sensitive files absent
+        run: |
+          if git ls-files deploy/vpsdime-scc | grep -E '(^|/)(pocketbase$|data/|pb_data/|.*\.sqlite3$|.*\.key$|.*\.pem$|\.env$)'; then
+            echo 'Refusing committed secrets, binary or database state' >&2
+            exit 1
+          fi
+          echo 'No committed runtime binary or data'
