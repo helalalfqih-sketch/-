@@ -68,6 +68,11 @@ jobs:
           assert 'reverse_proxy 127.0.0.1' not in f
           print('Caddy fragment checks: OK (not applied to running Caddy)')
           PY
+      - name: Validate Caddy host fragment with official Caddy image (no deploy)
+        run: |
+          bash -n deploy/vpsdime-scc/enable_creator_https.sh
+          docker run --rm --network none             -v "$PWD/deploy/vpsdime-scc/creator-api.Caddyfile:/etc/caddy/Caddyfile:ro"             caddy:2-alpine             caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+          echo "Caddy host fragment syntax passed (NOT APPLIED)"
       - name: Ensure sensitive files absent
         run: |
           if git ls-files deploy/vpsdime-scc | grep -E '(^|/)(pocketbase$|data/|pb_data/|.*\.sqlite3$|.*\.key$|.*\.pem$|\.env$)'; then
