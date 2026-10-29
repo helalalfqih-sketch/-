@@ -61,7 +61,7 @@ void main() {
         return http.Response(jsonEncode({
           'token': 'user-scope-token',
           'record': {'id': 'ownerA123', 'email': 'owner@example.invalid'}
-        }), 200);
+        }), 200, headers: {'content-type': 'application/json; charset=utf-8'});
       }
       if (req.method == 'POST' && req.url.path.endsWith('/products/records')) {
         expect(req.headers['authorization'], 'user-scope-token');
@@ -73,7 +73,7 @@ void main() {
           'id': 'prod123', 'owner': data['owner'],
           'title': data['title'], 'price_minor': data['price_minor'],
           'status': data['status'], 'currency': data['currency']
-        }), 200);
+        }), 200, headers: {'content-type': 'application/json; charset=utf-8'});
       }
       if (req.method == 'GET' && req.url.path.endsWith('/products/records')) {
         expect(req.headers['authorization'], 'user-scope-token');
@@ -82,7 +82,7 @@ void main() {
             {'id': 'prod123', 'owner': 'ownerA123', 'title': 'منتج خاص',
              'price_minor': 129900, 'currency': 'YER', 'status': 'draft'}
           ]
-        }), 200);
+        }), 200, headers: {'content-type': 'application/json; charset=utf-8'});
       }
       fail('Unexpected client request');
     });
@@ -116,7 +116,7 @@ void main() {
         return http.Response(jsonEncode({
           'token': 'renewed-user-token',
           'record': {'id': 'ownerA123', 'email': 'owner@example.invalid'}
-        }), 200);
+        }), 200, headers: {'content-type': 'application/json; charset=utf-8'});
       }),
     );
     final session = await client.refreshSession();
