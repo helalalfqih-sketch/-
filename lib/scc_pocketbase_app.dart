@@ -25,6 +25,7 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
   final _messengerKey = GlobalKey<ScaffoldMessengerState>();
   SccUserSession? _user;
   List<SccProduct> _products = const [];
+  List<SccContentItem> _content = const [];
   List<SccMediaAsset> _media = const [];
   bool _restoring = true;
   bool _busy = false;
@@ -120,6 +121,7 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
     setState(() {
       _user = null;
       _products = const [];
+      _content = const [];
       _media = const [];
       _page = 1;
       _hasMore = false;
@@ -162,10 +164,24 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
     }
   }
 
+  Future<void> _reloadContent() async {
+    if (_loading) return;
+    setState(() => _loading = true);
+    try {
+      final drafts = await _api.listContentItems(perPage: 100);
+      if (mounted) setState(() => _content = drafts);
+    } catch (error) {
+      _notice(_errorMessage(error));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
   void _onTab(int index) {
     if (_busy) return;
     setState(() => _tab = index);
-    if (index == 1) _reloadMedia();
+    if (index == 1) _reloadContent();
+    if (index == 2) _reloadMedia();
   }
 
   Future<void> _editProduct([SccProduct? existing]) async {
@@ -227,6 +243,65 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
       _notice('تم حذف المنتج');
     } catch (e) {
       _notice(_errorMessage(e));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+
+  Future<void> _editContent([SccContentItem? existing]) async {
+    if (_busy) return;
+    final draft = await showDialog<_SccDraftContent>(
+      context: _navigatorKey.currentContext!,
+      builder: (context) => _SccContentForm(existing: existing),
+    );
+    if (draft == null || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await _api.saveContentDraft(
+        id: existing?.id,
+        title: draft.title,
+        body: draft.body,
+        format: draft.format,
+      );
+      setState(() => _busy = false);
+      await _reloadContent();
+      _notice(existing == null ? 'تم حفظ المسودة' : 'تم تعديل المسودة');
+    } catch (error) {
+      _notice(_errorMessage(error));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _deleteContent(SccContentItem draft) async {
+    if (_busy) return;
+    final approved = await showDialog<bool>(
+      context: _navigatorKey.currentContext!,
+      builder: (context) => AlertDialog(
+        title: const Text('حذف المسودة؟'),
+        content: Text('سيتم حذف «' + draft.title + '» نهائيًا.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('إلغاء'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('حذف'),
+          ),
+        ],
+      ),
+    );
+    if (approved != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await _api.deleteContentDraft(draft.id);
+      setState(() => _busy = false);
+      await _reloadContent();
+      _notice('تم حذف المسودة');
+    } catch (error) {
+      _notice(_errorMessage(error));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -414,6 +489,70 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
     );
   }
 
+
+  Widget _contentView() {
+    if (_loading && _content.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_content.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.edit_note_rounded, size: 56),
+            const SizedBox(height: 12),
+            const Text('لا توجد مسودات محتوى بعد'),
+            TextButton(
+              onPressed: _reloadContent,
+              child: const Text('تحديث'),
+            ),
+          ],
+        ),
+      );
+    }
+    const formats = {
+      'post': 'منشور',
+      'reel': 'ريلز',
+      'story': 'ستوري',
+      'ad': 'إعلان',
+    };
+    return RefreshIndicator(
+      onRefresh: _reloadContent,
+      child: ListView.builder(
+        key: const Key('scc-content-list'),
+        itemCount: _content.length,
+        itemBuilder: (context, index) {
+          final draft = _content[index];
+          return Card(
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+            child: ListTile(
+              leading: const Icon(Icons.article_outlined),
+              title: Text(draft.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(formats[draft.format] ?? draft.format),
+                  if (draft.body.isNotEmpty)
+                    Text(draft.body, maxLines: 2, overflow: TextOverflow.ellipsis),
+                ],
+              ),
+              trailing: PopupMenuButton<String>(
+                onSelected: (value) {
+                  if (value == 'edit') _editContent(draft);
+                  if (value == 'delete') _deleteContent(draft);
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem(value: 'edit', child: Text('تعديل المسودة')),
+                  PopupMenuItem(value: 'delete', child: Text('حذف المسودة')),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   Widget _mediaView() {
     if (_loading && _media.isEmpty) {
       return const Center(child: CircularProgressIndicator());
@@ -461,39 +600,77 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
   }
 
   Widget _workspace() {
-    const titles = ['منتجاتي', 'الوسائط الخاصة', 'الحساب'];
+    const titles = ['منتجاتي', 'مسودات المحتوى', 'الوسائط الخاصة', 'الحساب'];
+    final VoidCallback? refresh = _tab == 0
+        ? _reloadProducts
+        : _tab == 1
+            ? _reloadContent
+            : _tab == 2
+                ? _reloadMedia
+                : null;
     return Scaffold(
       appBar: AppBar(
         title: Text(titles[_tab]),
         actions: [
-          IconButton(
-            tooltip: 'تحديث',
-            onPressed: _loading ? null : (_tab == 1 ? _reloadMedia : _reloadProducts),
-            icon: const Icon(Icons.refresh),
-          ),
+          if (refresh != null)
+            IconButton(
+              tooltip: 'تحديث',
+              onPressed: _loading ? null : refresh,
+              icon: const Icon(Icons.refresh),
+            ),
         ],
       ),
       body: IndexedStack(
         index: _tab,
-        children: [_productsView(), _mediaView(), _profileView()],
+        children: [
+          _productsView(),
+          _contentView(),
+          _mediaView(),
+          _profileView(),
+        ],
       ),
-      floatingActionButton: _tab == 2
+      floatingActionButton: _tab == 3
           ? null
           : FloatingActionButton.extended(
-              key: Key(_tab == 0 ? 'scc-add-product' : 'scc-upload-media'),
+              key: Key(_tab == 0
+                  ? 'scc-add-product'
+                  : _tab == 1
+                      ? 'scc-add-content'
+                      : 'scc-upload-media'),
               onPressed: _busy
                   ? null
-                  : (_tab == 0 ? () => _editProduct() : _uploadMedia),
-              icon: Icon(_tab == 0 ? Icons.add : Icons.upload_file),
-              label: Text(_tab == 0 ? 'إضافة منتج' : 'رفع ملف'),
+                  : _tab == 0
+                      ? () => _editProduct()
+                      : _tab == 1
+                          ? () => _editContent()
+                          : _uploadMedia,
+              icon: Icon(_tab == 2 ? Icons.upload_file : Icons.add),
+              label: Text(_tab == 0
+                  ? 'إضافة منتج'
+                  : _tab == 1
+                      ? 'مسودة جديدة'
+                      : 'رفع ملف'),
             ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
         onDestinationSelected: _onTab,
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.inventory_2_outlined), label: 'المنتجات'),
-          NavigationDestination(icon: Icon(Icons.perm_media_outlined), label: 'الوسائط'),
-          NavigationDestination(icon: Icon(Icons.person_outline), label: 'الحساب'),
+          NavigationDestination(
+            icon: Icon(Icons.inventory_2_outlined),
+            label: 'المنتجات',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.article_outlined),
+            label: 'المحتوى',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.perm_media_outlined),
+            label: 'الوسائط',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline),
+            label: 'الحساب',
+          ),
         ],
       ),
     );
@@ -622,6 +799,116 @@ class _SccProductFormState extends State<_SccProductForm> {
             ));
           },
           child: const Text('حفظ'),
+        ),
+      ],
+    );
+  }
+}
+
+
+class _SccDraftContent {
+  const _SccDraftContent(this.title, this.body, this.format);
+  final String title;
+  final String body;
+  final String format;
+}
+
+class _SccContentForm extends StatefulWidget {
+  const _SccContentForm({this.existing});
+  final SccContentItem? existing;
+
+  @override
+  State<_SccContentForm> createState() => _SccContentFormState();
+}
+
+class _SccContentFormState extends State<_SccContentForm> {
+  final _form = GlobalKey<FormState>();
+  late final TextEditingController _title;
+  late final TextEditingController _body;
+  late String _format;
+
+  @override
+  void initState() {
+    super.initState();
+    _title = TextEditingController(text: widget.existing?.title);
+    _body = TextEditingController(text: widget.existing?.body);
+    _format = widget.existing?.format ?? 'post';
+  }
+
+  @override
+  void dispose() {
+    _title.dispose();
+    _body.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.existing == null ? 'مسودة جديدة' : 'تعديل المسودة'),
+      content: SizedBox(
+        width: 430,
+        child: SingleChildScrollView(
+          child: Form(
+            key: _form,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  key: const Key('scc-content-title'),
+                  controller: _title,
+                  decoration: const InputDecoration(labelText: 'عنوان المحتوى'),
+                  maxLength: 240,
+                  validator: (v) => (v?.trim().isNotEmpty ?? false)
+                      ? null
+                      : 'أدخل عنوان المحتوى',
+                ),
+                TextFormField(
+                  key: const Key('scc-content-body'),
+                  controller: _body,
+                  decoration: const InputDecoration(labelText: 'نص المحتوى'),
+                  minLines: 3,
+                  maxLines: 7,
+                  maxLength: 30000,
+                  validator: (v) => (v?.trim().isNotEmpty ?? false)
+                      ? null
+                      : 'أدخل نص المحتوى',
+                ),
+                DropdownButtonFormField<String>(
+                  initialValue: _format,
+                  decoration: const InputDecoration(labelText: 'نوع المحتوى'),
+                  items: const [
+                    DropdownMenuItem(value: 'post', child: Text('منشور')),
+                    DropdownMenuItem(value: 'reel', child: Text('ريلز')),
+                    DropdownMenuItem(value: 'story', child: Text('ستوري')),
+                    DropdownMenuItem(value: 'ad', child: Text('إعلان')),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) setState(() => _format = value);
+                  },
+                ),
+                const SizedBox(height: 8),
+                const Text('يُحفظ المحتوى كمسودة خاصة، ولا يُنشر تلقائيًا.'),
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('إلغاء'),
+        ),
+        FilledButton(
+          key: const Key('scc-save-content'),
+          onPressed: () {
+            if (!_form.currentState!.validate()) return;
+            Navigator.pop(
+              context,
+              _SccDraftContent(_title.text.trim(), _body.text, _format),
+            );
+          },
+          child: const Text('حفظ المسودة'),
         ),
       ],
     );
