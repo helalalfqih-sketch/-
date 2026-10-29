@@ -1,0 +1,64 @@
+name: SCC Android optimized private device-test APK
+
+on:
+  push:
+    branches: [codex/scc-vps-production-foundation-20261029]
+    paths:
+      - .github/workflows/scc_android_optimized_preview.yml
+
+permissions:
+  contents: read
+
+jobs:
+  optimized-private-test-apks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.6'
+          channel: stable
+          cache: true
+      - name: Install Android NDK
+        run: |
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager 'ndk;28.2.13676358'
+      - name: Resolve Flutter packages
+        run: flutter pub get
+      - name: Verify PocketBase login and catalog UI
+        run: flutter test test/services/scc_pocketbase_client_test.dart test/widgets/scc_pocketbase_app_test.dart
+      - name: Compile ABI-split private test APKs (not store-signed)
+        run: |
+          flutter build apk --release --split-per-abi \
+            --target-platform android-arm64,android-x64 \
+            --dart-define=SCC_POCKETBASE_URL=https://creator-api.indexesstore.com
+        env:
+          GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx3g'
+      - name: Verify APK and sizes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, zipfile
+          files=list(Path('build/app/outputs/flutter-apk').glob('app-*-release.apk'))
+          assert len(files)>=2, f'Expected arm64 and x64 APKs, found {len(files)}'
+          for file in files:
+            with zipfile.ZipFile(file) as z:
+              assert z.testzip() is None
+            digest=hashlib.sha256(file.read_bytes()).hexdigest()
+            print(f'{file.name} {file.stat().st_size} bytes sha256={digest}')
+            assert file.stat().st_size < 300 * 1024 * 1024, 'Too large for Android cloud testing'
+          PY
+      - name: Upload APKs for PRIVATE testing only
+        uses: actions/upload-artifact@v4
+        with:
+          name: scc-pocketbase-optimized-test-apks
+          path: build/app/outputs/flutter-apk/app-*-release.apk
+          if-no-files-found: error
+          retention-days: 5
+
+# Gradle currently defaults release signing to Android debug key when no private
+# store signing material is provided. These APKs MUST NOT be published.
