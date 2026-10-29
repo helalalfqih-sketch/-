@@ -20,6 +20,18 @@ A smoke test was executed and passed: `GET /healthz` 200; unauthorized `GET /v1/
 
 The current API is **not PocketBase**. No official PocketBase binary was installed, and the SQLite schema must **not** be used as a PocketBase system database.
 
+## Local-only user service
+
+The staging API is now active through user-level `systemd` unit `scc-staging-api.service` under `chatgpt-admin`.
+
+- Listener: `127.0.0.1:8789` only (no public port or TLS exposure).
+- API health: `200 OK`; requests to private endpoints without local token: `401 Unauthorized`; all writes: `405 Method Not Allowed`.
+- Token is a private, auto-generated local file under `data/.local_admin_token`, mode `0600`; it must never be copied into mobile code, GitHub, logs, or a public URL.
+- Memory allocation observed about 9.6 MiB, user unit `MemoryMax=96M`.
+- Unit was enabled for user session startup, **but `Linger=no`**: service is not guaranteed to persist after all user sessions log out or after reboot. A separate authorized administrator action and a new test are needed for always-on reliability.
+- No WAHA containers, Docker permissions, reverse proxy, or firewall were changed.
+
+
 ## Flutter preview integration
 
 `lib/services/vps_staging_api.dart` adds an explicitly opt-in HTTPS health check.
