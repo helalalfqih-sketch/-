@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Verify artifact tooling syntax
         run: |
-          python3 -m py_compile deploy/vpsdime-scc/verify_release_zip.py deploy/vpsdime-scc/test_access_policy.py
+          python3 -m py_compile deploy/vpsdime-scc/verify_release_zip.py deploy/vpsdime-scc/test_access_policy.py deploy/vpsdime-scc/provision_normal_user.py
           bash -n deploy/vpsdime-scc/apply_production_schema.sh
           echo 'bc9663838bf94bb4a731aa575703f073a4a3795fbe2e53932e4197a85aa5b7e9  deploy/vpsdime-scc/pb_migrations/1793305000_scc_schema_v1.js' | sha256sum -c -
           python3 -m json.tool deploy/vpsdime-scc/schema-contract.json > /dev/null
