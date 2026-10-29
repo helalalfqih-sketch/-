@@ -80,6 +80,28 @@ class SccProduct {
       );
 }
 
+
+class SccMediaAsset {
+  const SccMediaAsset({
+    required this.id,
+    required this.owner,
+    required this.filename,
+    required this.label,
+  });
+
+  final String id;
+  final String owner;
+  final String filename;
+  final String label;
+
+  factory SccMediaAsset.fromJson(Map<String, dynamic> source) => SccMediaAsset(
+        id: source['id'] as String,
+        owner: source['owner'] as String,
+        filename: (source['file'] as String?) ?? '',
+        label: (source['label'] as String?) ?? '',
+      );
+}
+
 /// An opt-in PocketBase client for Smart Content Creator.
 /// Disabled until SCC_POCKETBASE_URL is supplied at build time.
 /// Uses normal user accounts, never a PocketBase superuser credential.
@@ -238,6 +260,69 @@ class SccPocketBaseClient {
           'status': 'draft',
         });
     return SccProduct.fromJson(data);
+  }
+
+
+  Future<SccProduct> updateProduct({
+    required String id,
+    required String title,
+    required int priceMinor,
+    String currency = 'YER',
+  }) async {
+    if (id.trim().isEmpty || title.trim().isEmpty || priceMinor < 0) {
+      throw ArgumentError('Invalid product information');
+    }
+    final data = await _request(
+      'PATCH',
+      '/api/collections/products/records/${Uri.encodeComponent(id)}',
+      body: {
+        'title': title.trim(),
+        'price_minor': priceMinor,
+        'currency': currency,
+      },
+    );
+    return SccProduct.fromJson(data);
+  }
+
+  Future<void> deleteProduct(String id) async {
+    if (id.trim().isEmpty) {
+      throw ArgumentError('Missing product ID');
+    }
+    final token = await _store.read();
+    if (token == null || token.isEmpty) {
+      throw const SccApiException(401, 'Login required');
+    }
+    final response = await _http.delete(
+      _uri('/api/collections/products/records/${Uri.encodeComponent(id)}'),
+      headers: {'Authorization': token},
+    );
+    if (response.statusCode == 401) {
+      _currentUserId = null;
+      await _store.write(null);
+    }
+    if (response.statusCode != 204 && response.statusCode != 200) {
+      throw SccApiException(response.statusCode, 'Product delete failed');
+    }
+  }
+
+  Future<List<SccMediaAsset>> listPrivateMedia({
+    int page = 1,
+    int perPage = 30,
+  }) async {
+    if (page <= 0 || perPage <= 0 || perPage > 100) {
+      throw ArgumentError('Invalid page or perPage');
+    }
+    final data = await _request(
+      'GET',
+      '/api/collections/media_assets/records?page=$page&perPage=$perPage',
+    );
+    final items = data['items'];
+    if (items is! List) {
+      throw const FormatException('Missing media list');
+    }
+    return items
+        .map((v) => SccMediaAsset.fromJson(v as Map<String, dynamic>))
+        .toList(growable: false);
   }
 
   /// Uploads private media. Access requires a PocketBase protected-file token.
