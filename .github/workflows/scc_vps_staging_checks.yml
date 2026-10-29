@@ -1,0 +1,32 @@
+name: SCC VPS staging checks
+
+on:
+  push:
+    branches:
+      - codex/scc-vps-backend-preview-20261029
+  pull_request:
+    branches:
+      - shorebird-test
+
+permissions:
+  contents: read
+
+jobs:
+  validate-staging-client:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.6'
+          channel: stable
+          cache: true
+      - name: Fetch dependencies
+        run: flutter pub get
+      - name: Analyze new client and tests
+        run: dart analyze lib/services/vps_staging_api.dart test/vps_staging_api_test.dart
+      - name: Run staging client tests
+        run: flutter test test/vps_staging_api_test.dart
