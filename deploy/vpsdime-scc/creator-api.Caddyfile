@@ -1,0 +1,17 @@
+# COPY THIS BLOCK INTO A REVIEWED COPY OF THE EXISTING Caddyfile.
+# Existing WAHA and Shopify Caddy routes MUST be preserved.
+# scc-pocketbase resolves over the shared internal Docker network.
+creator-api.indexesstore.com {
+    encode zstd gzip
+
+    @private_admin path /_/ /_/* /api/collections/_superusers /api/collections/_superusers/* /api/admins /api/admins/*
+    respond @private_admin "Forbidden" 403
+
+    header {
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        X-Frame-Options "DENY"
+    }
+
+    reverse_proxy scc-pocketbase:8090
+}
