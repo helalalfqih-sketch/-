@@ -5,8 +5,7 @@ Runs a TEMPORARY PocketBase instance on 127.0.0.1 with auto-cleanup.
 Does NOT connect to the production database, Docker, or a public hostname.
 Usage: python3 test_access_policy.py /path/to/pocketbase ./pb_migrations
 """
-import contextlib
-import http.client
+import base64
 import json
 from pathlib import Path
 import secrets
@@ -187,9 +186,39 @@ def main():
                 token=b_token
             ), "content list isolation")
             assert other_content["totalItems"] == 0
+
+            # Upload a valid 1x1 PNG in a protected file field.
+            png = base64.b64decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVesAAAAASUVORK5CYII="
+            )
+            boundary = "scc-" + secrets.token_hex(12)
+            parts = []
+            for key, value in (("owner", a_id), ("label", "Private file")):
+                parts.append(
+                    f"--{boundary}\r\nContent-Disposition: form-data; name=\"{key}\"\r\n"
+                    f"\r\n{value}\r\n".encode()
+                )
+            parts.append(
+                f"--{boundary}\r\nContent-Disposition: form-data; "
+                f"name=\"file\"; filename=\"test.png\"\r\n"
+                f"Content-Type: image/png\r\n\r\n".encode() + png + b"\r\n"
+            )
+            parts.append(f"--{boundary}--\r\n".encode())
+            asset = must_ok(req(
+                base, "POST", "/api/collections/media_assets/records",
+                token=a_token, raw=b"".join(parts),
+                content_type=f"multipart/form-data; boundary={boundary}"
+            ), "owner private media upload")
+            file_path = (f"/api/files/media_assets/{asset['id']}/"
+                         f"{asset['file']}")
+            must_deny(req(base, "GET", file_path),
+                      "anonymous protected file read")
+            must_deny(req(base, "GET", file_path, token=b_token),
+                      "other user protected file read")
             print("PASS: 2 users, registration locked, owner reads/writes, "
                   "cross-user denial, role/subscription/AI/audit restrictions, "
-                  "user verification protection, private draft isolation.")
+                  "user verification protection, private draft isolation, "
+                  "protected media upload and blocked public read.")
         finally:
             proc.terminate()
             try:
