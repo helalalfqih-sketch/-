@@ -58,3 +58,36 @@ Never paste superuser passwords or first-run setup URLs into chat or store them 
 7. Run device testing, signed APK/AAB and release gate checks. **NOT PRODUCTION-READY YET**.
 
 Never expose old staging Python ports 8789/8790. Never publish PocketBase port 8090 on the host. The official PocketBase release is pre-v1: schema and app upgrade discipline is important.
+
+
+## Additive HTTPS / Caddy rollout (prepared, NOT APPLIED)
+
+The active Caddyfile at:
+\`/opt/indexes-waha/apps/shopify-admin/indexes-waha/deploy/Caddyfile\`
+was confirmed unchanged (SHA-256 \`5d9abca634372248a58fb57f513416b36eba182ee783cdd72f28ca1fe7601ce0\`).
+The creator-api DNS record points to \`185.197.31.233\`, but origin HTTPS remained unconfigured.
+
+Files already staged on the VPS under \`/home/chatgpt-admin/scc-production-prep/\`:
+- \`creator-api.Caddyfile\`: additive site block; blocks \`/_\` and PocketBase superuser/admin API routes with 404; reverse-proxies only through the shared Docker network.
+- \`enable_creator_https.sh\`: validates source Caddy hash, root ownership, private PocketBase port, shared Docker network, live backend health and DNS; validates candidate config **inside running Caddy** before changing it, copies a rollback file, reloads Caddy, checks strict trusted HTTPS and blocked admin paths. Never restarts WAHA/Shopify.
+
+Before running from an **authorized root VPS console**, stage these two files as root-owned with digest checks:
+
+\`\`\`bash
+set -Eeuo pipefail
+SOURCE=/home/chatgpt-admin/scc-production-prep
+TARGET=/opt/scc-production
+
+install -d -o root -g root -m 0755 "$TARGET"
+install -o root -g root -m 0644 "$SOURCE/creator-api.Caddyfile" "$TARGET/creator-api.Caddyfile"
+install -o root -g root -m 0700 "$SOURCE/enable_creator_https.sh" "$TARGET/enable_creator_https.sh"
+
+echo "2f530d23a7ff180142443fe3e90c94f00dde7d598133215a593db1ec7c8ffdfd  $TARGET/creator-api.Caddyfile" | sha256sum -c -
+echo "e5b8f678c3d86f9a27fe63634c0a9b3f92436e34f564c34af036e37e3022ab90  $TARGET/enable_creator_https.sh" | sha256sum -c -
+
+bash "$TARGET/enable_creator_https.sh"
+\`\`\`
+
+The script is fail-closed on unexpected active Caddy changes, and attempts to restore prior config if reload/security checks fail. It may return \`HTTPS_PENDING\` if Let's Encrypt certificate issuance is not yet verified; that is **not** a successful launch. Only \`HTTPS_OK\` establishes origin TLS and API health, and even then Flutter is not yet connected or production-ready. Do not paste any credentials into chat.
+
+CI checks include syntax validation in an isolated official Caddy container; **the live root-owned Caddy configuration has not yet been changed**.
