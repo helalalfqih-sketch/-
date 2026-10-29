@@ -38,3 +38,14 @@ The debug APK is for a controlled device test. Never publish the debug APK as a 
 - HTTPS endpoint is working, but verified encrypted off-site backups, restore drill, per-user upload quotas, rate limiting, release signing and real-device acceptance are pending.
 
 **The URL and Flutter build define are not secrets. No administrator credentials belong in code or APK.**
+
+## Private Android APK build verification (2026-10-29)
+
+- GitHub Actions run `40950995136` **completed successfully**: https://github.com/helalalfqih-sketch/-/actions/runs/40950995136
+- Artifact ID `12932272335`, name `scc-pocketbase-android-debug`.
+- The artifact ZIP was extracted and the APK's ZIP structure verified locally.
+- APK uncompressed size: `414328990` bytes; SHA-256: `17b453a1ba7dab5ba72bf0a804e9a9022961b3f516c527f1e3d4ec5f627a1a5b`.
+- **No device-level pass claimed:** cloud emulator attachment rejected the local APK path; no Android session was created.
+- Build artifact is a debug-signed APK, **not a release-signed APK/AAB**. It should be used only on a test device.
+- Confirm the normal-user PocketBase account exists before attempting login: the superuser is intentionally not usable for the app.
+- The legacy Android manifest still contains Firebase-related integrations, and `android:usesCleartextTraffic=true` must be audited before a production release.
