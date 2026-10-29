@@ -1,0 +1,11 @@
+# Official binary must be supplied and independently verified, not committed to public GitHub.
+pocketbase
+*.zip
+*.sha256
+.env
+data/
+pb_data/
+*.sqlite3
+*.db
+*.pem
+*.key
