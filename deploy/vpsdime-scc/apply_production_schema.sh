@@ -36,14 +36,18 @@ install -d -m 0700 "$BACKUP_DIR"
 echo "=== STOP PocketBase only ==="
 docker stop "$CONTAINER" >/dev/null
 
-recover() {
+TMP=""
+cleanup() {
   status=$?
+  trap - EXIT
+  if [ -n "$TMP" ]; then rm -rf "$TMP"; fi
   if [ "$status" -ne 0 ]; then
     echo 'Schema apply failed; attempting to restart PocketBase only.' >&2
     docker start "$CONTAINER" >/dev/null 2>&1 || true
   fi
+  exit "$status"
 }
-trap recover EXIT
+trap cleanup EXIT
 
 echo "=== CONSISTENT BACKUP ==="
 docker run --rm --network none --cap-drop ALL \
@@ -53,7 +57,6 @@ docker run --rm --network none --cap-drop ALL \
 
 tar -tzf "$BACKUP_DIR/$BACKUP" >/dev/null
 TMP="$(mktemp -d /root/scc-schema-verify.XXXXXX)"
-trap 'rm -rf "$TMP"; recover' EXIT
 tar -xOzf "$BACKUP_DIR/$BACKUP" ./data.db > "$TMP/data.db"
 python3 - "$TMP/data.db" <<'PY'
 import sqlite3,sys
