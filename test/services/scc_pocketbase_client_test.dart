@@ -140,4 +140,95 @@ void main() {
     expect(store.token, isNull);
     client.close();
   });
+
+  test('private content: list, edit without owner spoofing, and delete',
+      () async {
+    final store = MemorySccTokenStore()..token = 'normal-user-token';
+    final calls = <String>[];
+    final api = SccPocketBaseClient(
+      baseUrl: 'https://creator-api.indexesstore.com',
+      tokenStore: store,
+      httpClient: MockClient((req) async {
+        calls.add(req.method + ' ' + req.url.path);
+        expect(req.headers['authorization'], 'normal-user-token');
+        if (req.method == 'GET') {
+          return http.Response(
+            jsonEncode({
+              'items': [
+                {
+                  'id': 'draft-a',
+                  'owner': 'user-a',
+                  'title': 'محتوى خاص',
+                  'body': 'مسودة قديمة',
+                  'format': 'post',
+                  'status': 'draft',
+                }
+              ],
+            }),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          );
+        }
+        if (req.method == 'PATCH') {
+          final data = jsonDecode(req.body) as Map<String, dynamic>;
+          expect(data.containsKey('owner'), isFalse);
+          expect(data['status'], 'draft');
+          return http.Response(
+            jsonEncode({
+              'id': 'draft-a',
+              'owner': 'user-a',
+              'title': data['title'],
+              'body': data['body'],
+              'format': data['format'],
+              'status': 'draft',
+            }),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          );
+        }
+        if (req.method == 'DELETE') {
+          return http.Response('', 204);
+        }
+        fail('Unexpected draft operation');
+      }),
+    );
+    final list = await api.listContentItems();
+    expect(list.single.title, 'محتوى خاص');
+    final updated = await api.saveContentDraft(
+      id: 'draft-a',
+      title: 'مسودة معدلة',
+      body: 'تحديث خاص',
+      format: 'ad',
+    );
+    expect(updated.body, 'تحديث خاص');
+    expect(updated.format, 'ad');
+    await api.deleteContentDraft('draft-a');
+    expect(calls, [
+      'GET /api/collections/content_items/records',
+      'PATCH /api/collections/content_items/records/draft-a',
+      'DELETE /api/collections/content_items/records/draft-a',
+    ]);
+    api.close();
+  });
+
+  test('rejects invalid content without contacting the server', () async {
+    final store = MemorySccTokenStore();
+    final api = SccPocketBaseClient(
+      baseUrl: 'https://creator-api.indexesstore.com',
+      tokenStore: store,
+      httpClient: MockClient((req) async {
+        fail('Invalid drafts must not reach the network');
+      }),
+    );
+    await expectLater(
+      api.saveContentDraft(title: '', body: 'body'),
+      throwsArgumentError,
+    );
+    await expectLater(
+      api.saveContentDraft(title: 'Valid', body: 'text', format: 'unsafe'),
+      throwsArgumentError,
+    );
+    api.close();
+  });
+
 }
