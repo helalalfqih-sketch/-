@@ -1,0 +1,106 @@
+{
+  "purpose": "Smart Content Creator production data contract. NOT a PocketBase migration; must be converted/tested with official API.",
+  "version": 1,
+  "initial_data": "EMPTY",
+  "target_backend": "PocketBase official verified release",
+  "rules": {
+    "auth_users": {
+      "type": "auth",
+      "default_role": "member",
+      "allowPublicRegistration": false,
+      "view": "owner_only",
+      "update": "owner_non_privileged_fields",
+      "role_change": "server_only",
+      "passwordReset": "email_verified"
+    },
+    "products": {
+      "type": "base",
+      "fields": [
+        "owner_relation",
+        "sku",
+        "title",
+        "description",
+        "price_decimal",
+        "currency",
+        "quantity",
+        "status",
+        "category",
+        "created",
+        "updated"
+      ],
+      "create": "authenticated_owner",
+      "list": "owner_only",
+      "view": "owner_only",
+      "update": "owner_only",
+      "delete": "owner_only",
+      "default_status": "draft"
+    },
+    "media_assets": {
+      "type": "base",
+      "fields": [
+        "owner_relation",
+        "file_protected",
+        "mime_type",
+        "size_bytes",
+        "visibility"
+      ],
+      "create": "authenticated_owner",
+      "list": "owner_only",
+      "read": "owner_only_default",
+      "public_sharing": "explicit_only"
+    },
+    "content_items": {
+      "type": "base",
+      "fields": [
+        "owner_relation",
+        "prompt",
+        "result_text",
+        "model",
+        "state"
+      ],
+      "create": "authenticated_owner",
+      "read": "owner_only"
+    },
+    "ai_jobs": {
+      "type": "base",
+      "fields": [
+        "owner_relation",
+        "job_type",
+        "state",
+        "request_id",
+        "result_file"
+      ],
+      "create": "backend_only",
+      "update": "backend_only",
+      "read": "owner_only"
+    },
+    "subscriptions": {
+      "type": "base",
+      "fields": [
+        "user_relation",
+        "plan",
+        "status",
+        "starts_at",
+        "expires_at"
+      ],
+      "write": "backend_only",
+      "read": "owner_only"
+    },
+    "audit_events": {
+      "type": "base",
+      "fields": [
+        "actor_relation",
+        "action",
+        "entity",
+        "created"
+      ],
+      "write": "backend_only",
+      "read": "admin_only"
+    }
+  },
+  "limitations": [
+    "Collection schema NOT created in PocketBase yet",
+    "Backend auth, email verification and RBAC require migration and runtime tests",
+    "No public gateway until auth and TLS complete"
+  ]
+}
