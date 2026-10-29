@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
@@ -307,6 +309,46 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
     }
   }
 
+  Future<void> _previewPrivateImage(SccMediaAsset asset) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final bytes = await _api.downloadPrivateImage(asset);
+      if (!mounted) return;
+      await showDialog<void>(
+        context: _navigatorKey.currentContext!,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(
+            asset.label.isEmpty ? 'معاينة خاصة' : asset.label,
+            maxLines: 2,
+          ),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: 520,
+              maxHeight: 550,
+            ),
+            child: Image.memory(
+              Uint8List.fromList(bytes),
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) =>
+                  const Text('لا يمكن عرض محتوى الصورة'),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('إغلاق'),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      _notice(_errorMessage(error));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _uploadMedia() async {
     if (_busy) return;
     final selected = await FilePicker.platform.pickFiles(
@@ -570,6 +612,18 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
             leading: const Icon(Icons.perm_media_outlined),
             title: Text(asset.label.isEmpty ? asset.filename : asset.label),
             subtitle: const Text('ملف خاص — لا يمكن الوصول إليه دون تصريح'),
+            trailing: const ['jpg', 'jpeg', 'png', 'webp'].any(
+              (ext) => asset.filename.toLowerCase().endsWith('.' + ext),
+            )
+                ? IconButton(
+                    key: Key('scc-preview-media-' + asset.id),
+                    tooltip: 'معاينة الصورة الخاصة',
+                    icon: const Icon(Icons.visibility_outlined),
+                    onPressed: _busy
+                        ? null
+                        : () => _previewPrivateImage(asset),
+                  )
+                : null,
           );
         },
       ),
