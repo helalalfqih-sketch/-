@@ -21,6 +21,7 @@ void main() {
       (tester) async {
     final saved = FakeSccTokenStore();
     final products = <Map<String, dynamic>>[];
+    final drafts = <Map<String, dynamic>>[];
     final requests = <String>[];
     final backend = MockClient((request) async {
       requests.add(request.method + ' ' + request.url.path);
@@ -57,6 +58,33 @@ void main() {
         });
         return http.Response(
           jsonEncode(products.last),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
+      }
+
+      if (path.endsWith('/content_items/records') &&
+          request.method == 'GET') {
+        expect(request.headers['authorization'], 'owner-token');
+        return http.Response(
+          jsonEncode({'items': drafts}),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
+      }
+      if (path.endsWith('/content_items/records') &&
+          request.method == 'POST') {
+        expect(request.headers['authorization'], 'owner-token');
+        final input = jsonDecode(request.body) as Map<String, dynamic>;
+        expect(input['owner'], 'test-user-1');
+        expect(input['status'], 'draft');
+        drafts.add({
+          'id': 'draft-1', 'owner': input['owner'],
+          'title': input['title'], 'body': input['body'],
+          'format': input['format'], 'status': input['status'],
+        });
+        return http.Response(
+          jsonEncode(drafts.last),
           200,
           headers: {'content-type': 'application/json; charset=utf-8'},
         );
@@ -106,6 +134,24 @@ void main() {
     expect(find.text('منتج أصلي'), findsOneWidget);
     expect(find.textContaining('14000'), findsOneWidget);
     expect(products.length, 1);
+
+    // Real content drafts tab uses the backend collection, not local demo data.
+    await tester.tap(find.text('المحتوى').last);
+    await tester.pumpAndSettle();
+    expect(find.text('لا توجد مسودات محتوى بعد'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('scc-add-content')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('scc-content-title')), 'إعلان أصلي',
+    );
+    await tester.enterText(
+      find.byKey(const Key('scc-content-body')), 'وصف منتج باللغة العربية',
+    );
+    await tester.tap(find.byKey(const Key('scc-save-content')));
+    await tester.pumpAndSettle();
+    expect(find.text('إعلان أصلي'), findsOneWidget);
+    expect(drafts.length, 1);
+    expect(drafts.single['status'], 'draft');
     await tester.tap(find.text('الحساب').last);
     await tester.pumpAndSettle();
     expect(find.text('user@example.invalid'), findsOneWidget);
@@ -115,5 +161,6 @@ void main() {
     expect(saved.value, isNull);
     expect(find.byKey(const Key('scc-login-email')), findsOneWidget);
     expect(requests, contains('POST /api/collections/products/records'));
+    expect(requests, contains('POST /api/collections/content_items/records'));
   });
 }
