@@ -21,6 +21,8 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _loginKey = GlobalKey<FormState>();
+  final _navigatorKey = GlobalKey<NavigatorState>();
+  final _messengerKey = GlobalKey<ScaffoldMessengerState>();
   SccUserSession? _user;
   List<SccProduct> _products = const [];
   List<SccMediaAsset> _media = const [];
@@ -71,8 +73,8 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
 
   void _notice(String value) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
+    _messengerKey.currentState
+      ?..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(value)));
   }
 
@@ -169,7 +171,7 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
   Future<void> _editProduct([SccProduct? existing]) async {
     if (_busy) return;
     final change = await showDialog<_SccProductDraft>(
-      context: context,
+      context: _navigatorKey.currentContext!,
       builder: (context) => _SccProductForm(existing: existing),
     );
     if (change == null || !mounted) return;
@@ -201,7 +203,7 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
   Future<void> _deleteProduct(SccProduct product) async {
     if (_busy) return;
     final approved = await showDialog<bool>(
-      context: context,
+      context: _navigatorKey.currentContext!,
       builder: (context) => AlertDialog(
         title: const Text('حذف المنتج؟'),
         content: Text('سيتم حذف «' + product.title + '» نهائيًا.'),
@@ -500,6 +502,8 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
+      scaffoldMessengerKey: _messengerKey,
       debugShowCheckedModeBanner: false,
       locale: const Locale('ar'),
       title: 'Smart Content Creator',
@@ -587,7 +591,7 @@ class _SccProductFormState extends State<_SccProductForm> {
                 },
               ),
               DropdownButtonFormField<String>(
-                value: _currency,
+                initialValue: _currency,
                 decoration: const InputDecoration(labelText: 'العملة'),
                 items: const [
                   DropdownMenuItem(value: 'YER', child: Text('ريال يمني')),
