@@ -1,0 +1,61 @@
+name: SCC VPS staging checks
+
+on:
+  push:
+    branches:
+      - codex/scc-vps-backend-preview-20261029
+  pull_request:
+    branches:
+      - shorebird-test
+
+permissions:
+  contents: read
+
+jobs:
+  validate-staging-client:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.6'
+          channel: stable
+          cache: true
+      - name: Fetch dependencies
+        run: flutter pub get
+      - name: Analyze new client and tests
+        run: dart analyze lib/services/vps_staging_api.dart lib/services/vps_auth_preview_client.dart test/vps_staging_api_test.dart test/vps_auth_preview_client_test.dart
+      - name: Run staging client tests
+        run: flutter test test/vps_staging_api_test.dart test/vps_auth_preview_client_test.dart
+
+  validate-staging-backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Initialize isolated empty database
+        working-directory: backend/vps-staging
+        run: python3 init_db.py
+      - name: Run local-only API security smoke tests
+        working-directory: backend/vps-staging
+        run: python3 smoke_test.py
+      - name: Initialize empty auth-preview database
+        working-directory: backend/vps-staging
+        run: python3 -B init_auth_preview.py
+      - name: Test registration disabled, login/logout, role isolation, validation
+        working-directory: backend/vps-staging
+        run: python3 -B -m unittest -v test_auth_preview
+      - name: Verify no secrets or DB files were committed
+        run: |
+          if git ls-files backend/vps-staging | grep -E '(^|/)(data/|\.local_admin_token$|.*\.sqlite3$|\.env$)'; then
+            echo 'ERROR: local database or secret was committed' >&2
+            exit 1
+          fi
