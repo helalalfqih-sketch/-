@@ -90,10 +90,11 @@ docker exec "$CADDY" caddy reload --config /etc/caddy/Caddyfile --adapter caddyf
 # Caddy obtains certificates automatically, so do not silently claim TLS success.
 echo "=== CHECK STRICT ORIGIN HTTPS ==="
 for i in $(seq 1 15); do
-  if curl -fsS --connect-timeout 3 --max-time 7 \
+  if health="$(curl -fsS --connect-timeout 3 --max-time 7 \
       --resolve "$DOMAIN:443:127.0.0.1" \
-      "https://$DOMAIN/api/health" > /tmp/scc-origin-health-check.out; then
-    if grep -q '"code":200' /tmp/scc-origin-health-check.out; then
+      "https://$DOMAIN/api/health")"; then
+    if printf '%s' "$health" |
+       python3 -c 'import json,sys; assert json.load(sys.stdin)["code"] == 200'; then
       for path in '/_/' '/api/collections/_superusers/auth-with-password'; do
         status=$(curl -sS --connect-timeout 3 --max-time 7 \
           --resolve "$DOMAIN:443:127.0.0.1" \
@@ -103,7 +104,6 @@ for i in $(seq 1 15); do
           exit 1
         fi
       done
-      rm -f /tmp/scc-origin-health-check.out
       echo "HTTPS_OK: trusted TLS + PocketBase 200 + administrative endpoints blocked."
       echo "Caddy rollback file saved at $backup"
       exit 0
@@ -111,7 +111,6 @@ for i in $(seq 1 15); do
   fi
   sleep 2
 done
-rm -f /tmp/scc-origin-health-check.out
 echo "HTTPS_PENDING: Caddy reloaded, but a trusted TLS certificate or API routing was not verified."
 echo "Do not connect Flutter yet. Check authorized Caddy logs and rerun strict TLS check."
 echo "Caddy rollback file saved at $backup"
