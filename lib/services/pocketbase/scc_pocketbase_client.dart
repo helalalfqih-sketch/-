@@ -102,6 +102,34 @@ class SccMediaAsset {
       );
 }
 
+class SccContentItem {
+  const SccContentItem({
+    required this.id,
+    required this.owner,
+    required this.title,
+    required this.body,
+    required this.format,
+    required this.status,
+  });
+
+  final String id;
+  final String owner;
+  final String title;
+  final String body;
+  final String format;
+  final String status;
+
+  factory SccContentItem.fromJson(Map<String, dynamic> source) =>
+      SccContentItem(
+        id: source['id'] as String,
+        owner: source['owner'] as String,
+        title: source['title'] as String,
+        body: (source['body'] as String?) ?? '',
+        format: (source['format'] as String?) ?? 'post',
+        status: (source['status'] as String?) ?? 'draft',
+      );
+}
+
 /// An opt-in PocketBase client for Smart Content Creator.
 /// Disabled until SCC_POCKETBASE_URL is supplied at build time.
 /// Uses normal user accounts, never a PocketBase superuser credential.
@@ -302,6 +330,88 @@ class SccPocketBaseClient {
     }
     if (response.statusCode != 204 && response.statusCode != 200) {
       throw SccApiException(response.statusCode, 'Product delete failed');
+    }
+  }
+
+  /// Personal content drafts are private per-user in PocketBase API rules.
+  Future<List<SccContentItem>> listContentItems({
+    int page = 1,
+    int perPage = 30,
+  }) async {
+    if (page <= 0 || perPage <= 0 || perPage > 100) {
+      throw ArgumentError('Invalid page or perPage');
+    }
+    final data = await _request(
+      'GET',
+      '/api/collections/content_items/records?page=$page&perPage=$perPage',
+    );
+    final items = data['items'];
+    if (items is! List) {
+      throw const FormatException('Missing content items list');
+    }
+    return items
+        .map((entry) =>
+            SccContentItem.fromJson(entry as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
+  Future<SccContentItem> saveContentDraft({
+    String? id,
+    required String title,
+    required String body,
+    String format = 'post',
+  }) async {
+    const allowedFormats = ['post', 'reel', 'story', 'ad'];
+    if (title.trim().isEmpty ||
+        title.trim().length > 240 ||
+        body.length > 30000 ||
+        !allowedFormats.contains(format)) {
+      throw ArgumentError('Invalid content draft');
+    }
+    final payload = <String, dynamic>{
+      'title': title.trim(),
+      'body': body,
+      'format': format,
+      'status': 'draft',
+    };
+    final isEditing = id != null && id.trim().isNotEmpty;
+    if (!isEditing) {
+      payload['owner'] = _currentUserId ?? (await refreshSession()).id;
+    }
+    final path = isEditing
+        ? '/api/collections/content_items/records/' +
+            Uri.encodeComponent(id)
+        : '/api/collections/content_items/records';
+    final result = await _request(
+      isEditing ? 'PATCH' : 'POST',
+      path,
+      body: payload,
+    );
+    return SccContentItem.fromJson(result);
+  }
+
+  Future<void> deleteContentDraft(String id) async {
+    if (id.trim().isEmpty) {
+      throw ArgumentError('Missing content ID');
+    }
+    final token = await _store.read();
+    if (token == null || token.isEmpty) {
+      throw const SccApiException(401, 'Login required');
+    }
+    final response = await _http.delete(
+      _uri('/api/collections/content_items/records/' +
+          Uri.encodeComponent(id)),
+      headers: {'Authorization': token},
+    );
+    if (response.statusCode == 401) {
+      _currentUserId = null;
+      await _store.write(null);
+    }
+    if (response.statusCode != 204 && response.statusCode != 200) {
+      throw SccApiException(
+        response.statusCode,
+        'Content delete failed',
+      );
     }
   }
 
