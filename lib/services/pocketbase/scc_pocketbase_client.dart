@@ -435,6 +435,47 @@ class SccPocketBaseClient {
         .toList(growable: false);
   }
 
+  /// Resolves private file bytes using a short-lived, user-scoped file token.
+  /// Never returns a persistent public URL or superuser credentials.
+  Future<List<int>> downloadPrivateImage(SccMediaAsset asset) async {
+    final filename = asset.filename.toLowerCase();
+    const extensions = ['.jpg', '.jpeg', '.png', '.webp'];
+    if (!extensions.any(filename.endsWith)) {
+      throw ArgumentError('Image preview supports JPG, PNG and WEBP only');
+    }
+    if (asset.id.isEmpty || asset.filename.isEmpty) {
+      throw ArgumentError('Invalid media record');
+    }
+
+    // PocketBase issues short-lived file tokens only to authenticated users.
+    final result = await _request(
+      'POST',
+      '/api/files/token',
+      body: const <String, dynamic>{},
+    );
+    final fileToken = result['token'];
+    if (fileToken is! String || fileToken.isEmpty) {
+      throw const FormatException('Missing protected file token');
+    }
+    final path = '/api/files/media_assets/' +
+        Uri.encodeComponent(asset.id) +
+        '/' +
+        Uri.encodeComponent(asset.filename) +
+        '?token=' +
+        Uri.encodeQueryComponent(fileToken);
+    final response = await _http.get(
+      _uri(path),
+      headers: {'Accept': 'image/*', 'Cache-Control': 'no-store'},
+    );
+    if (response.statusCode != 200) {
+      throw SccApiException(response.statusCode, 'Protected image read denied');
+    }
+    if (response.bodyBytes.isEmpty || response.bodyBytes.length > 26214400) {
+      throw const FormatException('Invalid protected image payload');
+    }
+    return response.bodyBytes;
+  }
+
   /// Uploads private media. Access requires a PocketBase protected-file token.
   Future<String> uploadPrivateMedia({
     required List<int> bytes,
