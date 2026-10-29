@@ -47,6 +47,12 @@ jobs:
       - name: Run local-only API security smoke tests
         working-directory: backend/vps-staging
         run: python3 smoke_test.py
+      - name: Initialize empty auth-preview database
+        working-directory: backend/vps-staging
+        run: python3 -B init_auth_preview.py
+      - name: Test registration disabled, login/logout, role isolation, validation
+        working-directory: backend/vps-staging
+        run: python3 -B -m unittest -v test_auth_preview
       - name: Verify no secrets or DB files were committed
         run: |
           if git ls-files backend/vps-staging | grep -E '(^|/)(data/|\.local_admin_token$|.*\.sqlite3$|\.env$)'; then
