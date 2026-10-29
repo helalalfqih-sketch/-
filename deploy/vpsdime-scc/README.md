@@ -1,15 +1,18 @@
 # Smart Content Creator — PocketBase on VPSDime
 
-## Actual state (29 Oct 2026)
+## Verified deployed state (29 Oct 2026)
 
-- **PocketBase v0.40.6 installed and running privately** on the existing VPS under the Docker container `scc-production-pocketbase-1`. Confirmed previously `healthy` and `/api/health` returned HTTP 200. Not currently visible from the public internet.
-- Owner created the first superuser privately through the VPS root console. Credentials and setup links are NEVER committed to Git.
-- Docker volume `scc_production_pocketbase_data` persists the `data.db` file.
-- A first **local** backup was created under `/root/scc-backups/`; its archive passed the TAR listing test. A second, off-VPS restore verification is still required.
-- **The production database schema has not been migrated**. Current production user registration is not yet locked by the pending migration, so do **not** expose the API publicly.
-- Existing WAHA, Shopify, and Caddy routes must be preserved. DNS `creator-api.indexesstore.com` resolves to 185.197.31.233, but TLS for the hostname has not been configured.
-- Runtime migration files were staged (without execution) under `/home/chatgpt-admin/scc-production-prep/`.
-- The remote ChatGPT connection uses an unprivileged `chatgpt-admin` user: no Docker daemon access. Only the authorized VPS root console can apply the production migration.
+- **PocketBase v0.40.6 is running privately** as `scc-production-pocketbase-1` on VPSDime, with a separately persistent Docker volume `scc_production_pocketbase_data`. No host port for PocketBase is published.
+- The first superuser was provisioned privately. Public superuser URLs are hidden by Caddy; NEVER add credentials/tokens to Git or chat.
+- Production migration `1793305000_scc_schema_v1.js` **WAS APPLIED** by the authorized root operator, with exact SHA256 verification, a new consistent local backup, SQLite integrity OK, and `MIGRATION_OK: PocketBase healthy; no public host ports.`
+- The original root-managed Caddyfile was safely amended with the separate `creator-api.indexesstore.com` virtual host; certificate issuance completed and both the API and administrative-route guards passed the operator's `HTTPS_OK` check.
+- Independently checked from the VPS: strict public HTTPS returned 200 and `ssl_verify_result=0` for `https://creator-api.indexesstore.com/api/health`. Let's Encrypt issued a certificate for the correct SAN, valid from 2026-10-29 to 2027-01-27.
+- `/_`, `/_/` and superuser/auth administrative routes returned 404; anonymous user signup returned 403; unauthenticated products returned 0 records, and user_roles and audit_events returned 403. Verify all endpoint policy after future upgrades.
+- WAHA ping still returned 200/pong; the original Shopify primary domain remains `indexesstore.com`.
+- Initial local backups were created, including pre-schema archive `/root/scc-backups/scc-pre-schema-20261029-200639.tar.gz`. An off-site encrypted backup and restore drill remain outstanding.
+- The server is RAM and disk constrained (~1.4 GiB available RAM and ~4.7 GiB free disk). Enforce media quotas and plan external object storage before onboarding users.
+- PocketBase currently returns `Access-Control-Allow-Origin: *`. This is not a standalone authorization bypass, but requires an explicit origin policy before browser/web release.
+- **Not production-ready as a complete app.** Existing Flutter app still starts Firebase; a separately tested PocketBase client exists but is not integrated into the real login/catalog/AI flows.
 
 ## Implemented and locally tested
 
@@ -60,34 +63,11 @@ Never paste superuser passwords or first-run setup URLs into chat or store them 
 Never expose old staging Python ports 8789/8790. Never publish PocketBase port 8090 on the host. The official PocketBase release is pre-v1: schema and app upgrade discipline is important.
 
 
-## Additive HTTPS / Caddy rollout (prepared, NOT APPLIED)
+## HTTPS rollout record — APPLIED and VERIFIED
 
-The active Caddyfile at:
-\`/opt/indexes-waha/apps/shopify-admin/indexes-waha/deploy/Caddyfile\`
-was confirmed unchanged (SHA-256 \`5d9abca634372248a58fb57f513416b36eba182ee783cdd72f28ca1fe7601ce0\`).
-The creator-api DNS record points to \`185.197.31.233\`, but origin HTTPS remained unconfigured.
+The root operator installed the reviewed creator-api Caddy fragment and ran `enable_creator_https.sh`. Caddy validated the full candidate config, reloaded in place, and returned `HTTPS_OK` after TLS certificate issuance. No published PocketBase host ports. The original Caddy routes remained in the file.
 
-Files already staged on the VPS under \`/home/chatgpt-admin/scc-production-prep/\`:
-- \`creator-api.Caddyfile\`: additive site block; blocks \`/_\` and PocketBase superuser/admin API routes with 404; reverse-proxies only through the shared Docker network.
-- \`enable_creator_https.sh\`: validates source Caddy hash, root ownership, private PocketBase port, shared Docker network, live backend health and DNS; validates candidate config **inside running Caddy** before changing it, copies a rollback file, reloads Caddy, checks strict trusted HTTPS and blocked admin paths. Never restarts WAHA/Shopify.
+For future Caddy changes, **do not rerun the one-time apply script blindly**: its pre-change SHA guard intentionally expects the old config and will stop once the new virtual host exists. Treat future edits as a new reviewed change. Rollback file is retained at `/opt/indexes-waha/apps/shopify-admin/indexes-waha/deploy/Caddyfile.scc-backup.20261029-202038` on the VPS.
 
-Before running from an **authorized root VPS console**, stage these two files as root-owned with digest checks:
+`CORS: *` is currently seen on OPTIONS requests. Keep authentication and collection authorization enforceable server-side. Restrict browser origins before a web release.
 
-\`\`\`bash
-set -Eeuo pipefail
-SOURCE=/home/chatgpt-admin/scc-production-prep
-TARGET=/opt/scc-production
-
-install -d -o root -g root -m 0755 "$TARGET"
-install -o root -g root -m 0644 "$SOURCE/creator-api.Caddyfile" "$TARGET/creator-api.Caddyfile"
-install -o root -g root -m 0700 "$SOURCE/enable_creator_https.sh" "$TARGET/enable_creator_https.sh"
-
-echo "2f530d23a7ff180142443fe3e90c94f00dde7d598133215a593db1ec7c8ffdfd  $TARGET/creator-api.Caddyfile" | sha256sum -c -
-echo "e5b8f678c3d86f9a27fe63634c0a9b3f92436e34f564c34af036e37e3022ab90  $TARGET/enable_creator_https.sh" | sha256sum -c -
-
-bash "$TARGET/enable_creator_https.sh"
-\`\`\`
-
-The script is fail-closed on unexpected active Caddy changes, and attempts to restore prior config if reload/security checks fail. It may return \`HTTPS_PENDING\` if Let's Encrypt certificate issuance is not yet verified; that is **not** a successful launch. Only \`HTTPS_OK\` establishes origin TLS and API health, and even then Flutter is not yet connected or production-ready. Do not paste any credentials into chat.
-
-CI checks include syntax validation in an isolated official Caddy container; **the live root-owned Caddy configuration has not yet been changed**.
