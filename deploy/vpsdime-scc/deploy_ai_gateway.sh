@@ -65,7 +65,7 @@ assert svc.get("ports") is None
 assert svc.get("read_only") is True
 assert "ALL" in svc["cap_drop"]
 assert "--hooksDir=/pb_hooks" in svc["entrypoint"]
-assert any("/pb_hooks:/pb_hooks:ro" == value for value in svc["volumes"])
+assert "/opt/scc-production/pb_hooks:/pb_hooks:ro" in svc["volumes"], "Expected read-only production hooks mount"
 assert cfg["networks"]["wa"]["external"] is True
 PY
 # Stage and hash the hook only after all preflight assertions.
