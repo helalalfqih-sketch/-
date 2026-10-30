@@ -1,0 +1,18 @@
+# ADDITIVE virtual host only; no changes to existing WAHA or Shopify sites.
+# Root-owned Caddy configuration is /opt/indexes-waha/apps/shopify-admin/indexes-waha/deploy/Caddyfile.
+# PocketBase is NOT exposed directly on host port 8090.
+creator-api.indexesstore.com {
+    encode zstd gzip
+
+    # No public superuser bootstrap, auth, dashboard, or legacy admin API.
+    @private_admin path /_ /_/* /api/collections/_superusers /api/collections/_superusers/* /api/admins /api/admins/*
+    respond @private_admin "Not Found" 404
+
+    header {
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        X-Frame-Options "DENY"
+    }
+
+    reverse_proxy scc-pocketbase:8090
+}

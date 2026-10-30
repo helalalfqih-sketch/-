@@ -1,0 +1,51 @@
+name: scc-production
+
+services:
+  pocketbase:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        ALPINE_IMAGE: "${ALPINE_IMAGE:?Provide an independently verified alpine image pinned by sha256 digest}"
+    image: "local/scc-pocketbase:${POCKETBASE_VERSION:?Provide a verified official version}"
+    restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=32m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 60
+    mem_limit: 384m
+    expose:
+      - "8090"
+    networks:
+      wa:
+        aliases:
+          - scc-pocketbase
+    volumes:
+      - scc_pb_data:/pb_data
+      # Included at /pb_migrations inside PocketBase; not executable by Docker itself.
+      - ./pb_migrations:/pb_migrations:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8090/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+networks:
+  wa:
+    external: true
+    name: "${WAHA_DOCKER_NETWORK:-indexes-waha_default}"
+
+volumes:
+  scc_pb_data:
+    name: scc_production_pocketbase_data

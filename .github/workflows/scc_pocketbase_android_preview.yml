@@ -1,0 +1,46 @@
+name: SCC PocketBase Android debug APK (private test)
+
+on:
+  # Manual only: the optimized test build handles private device QA.
+  # Avoid running the large 400MB debug compilation on every code commit.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-private-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout draft branch
+        uses: actions/checkout@v4
+      - name: Install Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.6'
+          channel: stable
+          cache: true
+      - name: Install declared NDK
+        run: |
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager 'ndk;28.2.13676358'
+      - name: Flutter dependencies
+        run: flutter pub get
+      - name: Build test-only PocketBase Android APK (no production release)
+        run: |
+          flutter build apk --debug \
+            --dart-define=SCC_POCKETBASE_URL=https://creator-api.indexesstore.com
+        env:
+          GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx3g'
+      - name: Archive private debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: scc-pocketbase-android-debug
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 5

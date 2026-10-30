@@ -10,7 +10,8 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:enableOnBackInvokedCallback="true"
-        android:usesCleartextTraffic="true">
+        android:usesCleartextTraffic="false"
+        android:allowBackup="false">
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -33,6 +34,15 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
             
+            <!-- app_links owns OAuth callbacks; Flutter's default router must not consume them. -->
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="false" />
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.indexes.scc" android:host="oauth" android:path="/google" />
+            </intent-filter>
+
             <!-- Deep Linking for Firebase Auth & TikTok Callback -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
@@ -192,3 +202,4 @@
     </queries>
 
 </manifest>
+

@@ -1,0 +1,84 @@
+name: SCC Android no-login private device-test APK
+
+on:
+  push:
+    branches: [codex/scc-vps-production-foundation-20261029]
+    paths:
+      - .github/workflows/scc_android_optimized_preview.yml
+
+permissions:
+  contents: read
+
+jobs:
+  optimized-private-test-apks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.6'
+          channel: stable
+          cache: true
+      - name: Install Android NDK
+        run: |
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager 'ndk;28.2.13676358'
+      - name: Resolve Flutter packages
+        run: flutter pub get
+      - name: Verify PocketBase login and catalog UI
+        run: flutter test test/services/scc_pocketbase_client_test.dart test/widgets/scc_pocketbase_app_test.dart
+      - name: Prepare explicit private device-test signing
+        run: |
+          keytool -genkeypair -keystore "$RUNNER_TEMP/scc-private-test.jks" \
+            -storepass android -keypass android -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 30 \
+            -dname "CN=SCC Private Device Test,O=Indexes,C=YE"
+          printf 'storeFile=%s\nstorePassword=android\nkeyPassword=android\nkeyAlias=androiddebugkey\n' "$RUNNER_TEMP/scc-private-test.jks" > android/key.properties
+      - name: Compile ABI-split private test APKs (not store-signed)
+        run: |
+          flutter build apk --release --split-per-abi -t lib/main_scc_release.dart \
+            --target-platform android-arm64,android-x64 \
+            --dart-define=SCC_POCKETBASE_URL=https://creator-api.indexesstore.com
+        env:
+          GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx3g'
+      - name: Verify APK and sizes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, zipfile
+          files=list(Path('build/app/outputs/flutter-apk').glob('app-*-release.apk'))
+          assert len(files)>=2, f'Expected arm64 and x64 APKs, found {len(files)}'
+          for file in files:
+            with zipfile.ZipFile(file) as z:
+              assert z.testzip() is None
+            digest=hashlib.sha256(file.read_bytes()).hexdigest()
+            print(f'{file.name} {file.stat().st_size} bytes sha256={digest}')
+            assert file.stat().st_size < 300 * 1024 * 1024, 'Too large for Android cloud testing'
+          PY
+      - name: Verify APK signatures
+        run: |
+          signer="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          test -n "$signer"
+          for apk in build/app/outputs/flutter-apk/app-*-release.apk; do
+            "$signer" verify --verbose --print-certs "$apk"
+            aapt="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
+            "$aapt" dump badging "$apk" | sed -n '1p'
+          done
+      - name: Record source revision
+        run: |
+          printf '%s\n' "$GITHUB_SHA" > build/app/outputs/flutter-apk/SOURCE_COMMIT.txt
+      - name: Upload APKs for PRIVATE testing only
+        uses: actions/upload-artifact@v4
+        with:
+          name: scc-guest-device-apks-${{ github.sha }}
+          path: |
+            build/app/outputs/flutter-apk/app-*-release.apk
+            build/app/outputs/flutter-apk/SOURCE_COMMIT.txt
+          if-no-files-found: error
+          retention-days: 5
+
+# Explicit disposable private-test signing only. These APKs MUST NOT be published.

@@ -39,12 +39,22 @@ import 'package:flutter_screenutil/flutter_screenutil.dart'; // حزمة لجع�
 import 'package:responsive_framework/responsive_framework.dart';
 import 'core/storage/app_storage_service.dart'; // خدمة التخزين الموحدة
 import 'services/secure_storage_service.dart';
+import 'services/pocketbase/scc_pocketbase_client.dart';
+import 'scc_pocketbase_app.dart';
 import 'theme/app_theme.dart'; // استيراد نظام الألوان والتصميم (الثيم) الخاص بالتطبيق
 
 // 🚀 الدالة الأساسية التي تبدأ تشغيل التطبيق
 Future<void> main() async {
   // التأكد من تهيئة روابط Flutter قبل البدء بأي عمليات
   WidgetsFlutterBinding.ensureInitialized();
+
+  // A separate fully-PocketBase-backed login/catalog shell is enabled explicitly.
+  // It MUST run before Firebase, GetX bindings, or legacy providers initialize.
+  // The old production app remains unchanged when the build define is absent.
+  if (SccPocketBaseClient.configuredUrl.isNotEmpty) {
+    runApp(const SccPocketBaseApp());
+    return;
+  }
   
   // 🎬 تهيئة مكتبة الميديا لتشغيل الفيديوهات والتريندات (Media Kit)
   MediaKit.ensureInitialized();

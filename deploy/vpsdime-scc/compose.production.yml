@@ -1,0 +1,54 @@
+# Production runtime manifest. Root-owned copy belongs at /opt/scc-production/compose.production.yml.
+# Uses the already-built and verified local PocketBase 0.40.6 image; no image pull.
+name: scc-production
+services:
+  pocketbase:
+    image: local/scc-pocketbase:0.40.6
+    entrypoint:
+      - /usr/local/bin/pocketbase
+      - serve
+      - --http=0.0.0.0:8090
+      - --dir=/pb_data
+      - --migrationsDir=/pb_migrations
+      - --hooksDir=/pb_hooks
+      - --automigrate=false
+    restart: unless-stopped
+    # Optional until the operator enters provider credentials; AI fails closed (503).
+    # File stays root-owned 0600, never committed or sent to chat.
+    env_file:
+      - path: /opt/scc-production/ai.env
+        required: false
+        format: raw
+    user: "10001:10001"
+    read_only: true
+    tmpfs: ["/tmp:rw,nosuid,nodev,size=32m"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 60
+    mem_limit: 384m
+    expose: ["8090"]
+    networks:
+      wa:
+        aliases: [scc-pocketbase]
+    volumes:
+      - scc_pb_data:/pb_data
+      - /opt/scc-production/pb_migrations:/pb_migrations:ro
+      - /opt/scc-production/pb_hooks:/pb_hooks:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8090/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+networks:
+  wa:
+    external: true
+    name: indexes-waha_default
+volumes:
+  scc_pb_data:
+    name: scc_production_pocketbase_data

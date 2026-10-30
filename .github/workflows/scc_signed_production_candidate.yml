@@ -1,0 +1,115 @@
+name: SCC signed production Android candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: Confirmed release version, e.g. 1.3.0
+        required: true
+        type: string
+      version_code:
+        description: Confirmed versionCode higher than any existing store version
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  signed-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.6'
+          channel: stable
+          cache: true
+      - name: Verify the live production backend and authentication guard
+        run: |
+          set -Eeuo pipefail
+          curl -fsS --max-time 10 https://creator-api.indexesstore.com/api/health |
+            python3 -c 'import sys,json; assert json.load(sys.stdin)["code"]==200'
+          admin=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' https://creator-api.indexesstore.com/_/)
+          [ "$admin" = 404 ] || { echo "Admin dashboard exposed"; exit 1; }
+          noauth=$(curl -sS --max-time 10 -o /dev/null -w '%{http_code}' -X POST \
+            -H 'Content-Type: application/json' -d '{"mode":"chat","prompt":"guard"}' \
+            https://creator-api.indexesstore.com/api/scc/ai/text)
+          [ "$noauth" = 401 ] || { echo "Real AI endpoint unavailable or unprotected"; exit 1; }
+      - name: Prevent release with placeholder package or insecure Android network config
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+          VERSION_CODE: ${{ inputs.version_code }}
+        run: |
+          set -Eeuo pipefail
+          if grep -q 'applicationId = "com.example.' android/app/build.gradle.kts; then
+            echo "Confirm a production Android application ID before signing."
+            exit 1
+          fi
+          [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$VERSION_CODE" =~ ^[1-9][0-9]*$ ]]
+          ! grep -q 'android:usesCleartextTraffic="true"' android/app/src/main/AndroidManifest.xml
+      - name: Require authorized store signing secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          set -Eeuo pipefail
+          umask 077
+          for value in "$KEYSTORE_BASE64" "$KEYSTORE_PASSWORD" "$KEY_PASSWORD" "$KEY_ALIAS"; do
+            [ -n "$value" ] || { echo 'Signing credential not configured'; exit 1; }
+          done
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+          [ -s android/app/upload-keystore.jks ]
+          {
+            printf 'storePassword=%s\n' "$KEYSTORE_PASSWORD"
+            printf 'keyPassword=%s\n' "$KEY_PASSWORD"
+            printf 'keyAlias=%s\n' "$KEY_ALIAS"
+            printf 'storeFile=upload-keystore.jks\n'
+          } > android/key.properties
+          chmod 0600 android/key.properties android/app/upload-keystore.jks
+      - name: Prepare Android SDK and Flutter dependencies
+        run: |
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager 'ndk;28.2.13676358'
+          flutter pub get
+      - name: Build signed AAB and ABI APK from the production-only entrypoint
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+          VERSION_CODE: ${{ inputs.version_code }}
+          GRADLE_OPTS: '-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx3g'
+        run: |
+          flutter build appbundle --release -t lib/main_scc_release.dart \
+            --build-name="$RELEASE_VERSION" --build-number="$VERSION_CODE" \
+            --dart-define=SCC_POCKETBASE_URL=https://creator-api.indexesstore.com
+          flutter build apk --release --split-per-abi -t lib/main_scc_release.dart \
+            --build-name="$RELEASE_VERSION" --build-number="$VERSION_CODE" \
+            --dart-define=SCC_POCKETBASE_URL=https://creator-api.indexesstore.com
+      - name: Verify signatures; do not publish
+        run: |
+          set -Eeuo pipefail
+          AAB=build/app/outputs/bundle/release/app-release.aab
+          [ -s "$AAB" ]
+          jarsigner -verify -strict "$AAB" >/dev/null
+          count=0
+          for APK in build/app/outputs/flutter-apk/app-*-release.apk; do
+            [ -s "$APK" ]
+            $ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner verify "$APK"
+            count=$((count+1))
+          done
+          [ "$count" -ge 2 ]
+          echo 'Signed artifacts checked without any public release.'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scc-production-signed-candidate
+          path: |
+            build/app/outputs/bundle/release/*.aab
+            build/app/outputs/flutter-apk/app-*-release.apk
+          retention-days: 7
+          if-no-files-found: error
