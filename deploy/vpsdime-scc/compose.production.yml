@@ -10,8 +10,14 @@ services:
       - --http=0.0.0.0:8090
       - --dir=/pb_data
       - --migrationsDir=/pb_migrations
+      - --hooksDir=/pb_hooks
       - --automigrate=false
     restart: unless-stopped
+    # Optional until the operator enters provider credentials; AI fails closed (503).
+    # File stays root-owned 0600, never committed or sent to chat.
+    env_file:
+      - path: /opt/scc-production/ai.env
+        required: false
     user: "10001:10001"
     read_only: true
     tmpfs: ["/tmp:rw,nosuid,nodev,size=32m"]
@@ -26,6 +32,7 @@ services:
     volumes:
       - scc_pb_data:/pb_data
       - /opt/scc-production/pb_migrations:/pb_migrations:ro
+      - /opt/scc-production/pb_hooks:/pb_hooks:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8090/api/health"]
       interval: 30s
