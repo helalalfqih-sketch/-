@@ -9,3 +9,9 @@ pb_data/
 *.db
 *.pem
 *.key
+
+# Never commit API provider credentials or deployment backups.
+ai.env
+*.env
+*.bak
+*.backup
