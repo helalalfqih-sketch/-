@@ -17,6 +17,40 @@ class FakeSccTokenStore implements SccTokenStore {
 }
 
 void main() {
+  testWidgets('guest opens workspace without login and retries network failure', (tester) async {
+    final identity = FakeSccTokenStore();
+    var attempts = 0;
+    final client = SccPocketBaseClient(baseUrl: 'https://creator-api.indexesstore.com',
+      tokenStore: FakeSccTokenStore(), guestStore: identity,
+      httpClient: MockClient((req) async {
+        if (req.url.path == '/api/scc/guest/session') {
+          attempts++;
+          if (attempts == 1) throw http.ClientException('offline');
+          return http.Response(jsonEncode({'token': 'guest-token', 'record': {
+            'id': 'guest-one', 'email': '', 'collectionName': 'users'
+          }}), 200);
+        }
+        expect(req.headers['authorization'], 'guest-token');
+        expect(req.url.path, '/api/collections/products/records');
+        return http.Response('{"items":[]}', 200);
+      }));
+    addTearDown(client.close);
+    await tester.pumpWidget(SccPocketBaseApp(client: client, guestMode: true));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('scc-login-email')), findsNothing);
+    expect(find.byKey(const Key('scc-login-google')), findsNothing);
+    expect(find.byKey(const Key('scc-guest-retry')), findsOneWidget);
+    final saved = identity.value;
+    await tester.tap(find.byKey(const Key('scc-guest-retry')));
+    await tester.pumpAndSettle();
+    expect(identity.value, saved);
+    expect(find.byKey(const Key('scc-add-product')), findsOneWidget);
+    await tester.tap(find.text('الحساب').last);
+    await tester.pumpAndSettle();
+    expect(find.text('مساحتك الخاصة على هذا الجهاز'), findsOneWidget);
+    expect(find.byKey(const Key('scc-signout')), findsNothing);
+  });
+
   testWidgets('real PocketBase login and product screen, without Firebase',
       (tester) async {
     final saved = FakeSccTokenStore();

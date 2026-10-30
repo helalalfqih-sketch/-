@@ -45,6 +45,13 @@ routerAdd("POST", "/api/scc/ai/text", (e) => {
   // Serialize usage reservation to avoid arbitrary parallel provider spend.
   try {
     e.app.runInTransaction((tx) => {
+      // Hard global daily budget for the private no-login trial, including failures.
+      // Reserved in the same transaction as per-user/concurrent limits.
+      if (tx.findRecordsByFilter('ai_jobs', 'created >= {:since}', '', 50, 0,
+          {since: since}).length >= 50) {
+        limited = true;
+        return;
+      }
       const recent = tx.findRecordsByFilter(
         "ai_jobs",
         "owner = {:owner} && created >= {:since}",
@@ -154,3 +161,4 @@ routerAdd("POST", "/api/scc/ai/text", (e) => {
     text: resultText
   });
 }, $apis.requireAuth("users"));
+

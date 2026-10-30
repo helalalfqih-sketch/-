@@ -1,4 +1,4 @@
-name: SCC Android optimized private device-test APK
+name: SCC Android no-login private device-test APK
 
 on:
   push:
@@ -72,7 +72,7 @@ jobs:
       - name: Upload APKs for PRIVATE testing only
         uses: actions/upload-artifact@v4
         with:
-          name: scc-ai-device-apks-${{ github.sha }}
+          name: scc-guest-device-apks-${{ github.sha }}
           path: |
             build/app/outputs/flutter-apk/app-*-release.apk
             build/app/outputs/flutter-apk/SOURCE_COMMIT.txt

@@ -86,3 +86,11 @@ jobs:
             exit 1
           fi
           echo 'No committed runtime binary or data'
+
+
+      - name: Real isolated PocketBase guest integration tests (no deployment or provider spend)
+        run: |
+          curl --fail --location --retry 2 --output "$RUNNER_TEMP/pb.zip" https://github.com/pocketbase/pocketbase/releases/download/v0.40.6/pocketbase_0.40.6_linux_amd64.zip
+          unzip -q "$RUNNER_TEMP/pb.zip" pocketbase -d "$RUNNER_TEMP/scc-pb"
+          chmod +x "$RUNNER_TEMP/scc-pb/pocketbase"
+          python3 deploy/vpsdime-scc/test_guest_access.py "$RUNNER_TEMP/scc-pb/pocketbase"

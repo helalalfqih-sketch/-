@@ -19,5 +19,6 @@ void main() {
     );
   }
 
-  runApp(const SccPocketBaseApp());
+  runApp(const SccPocketBaseApp(guestMode: true));
 }
+

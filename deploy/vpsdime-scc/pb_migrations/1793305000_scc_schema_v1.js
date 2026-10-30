@@ -136,3 +136,4 @@ migrate((app) => {
   }
   // Do not revert 'users' rules automatically; fail closed on rollback.
 });
+

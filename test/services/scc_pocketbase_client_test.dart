@@ -14,6 +14,46 @@ class MemorySccTokenStore implements SccTokenStore {
 }
 
 void main() {
+  test('guest retry preserves device identity and parallel starts coalesce', () async {
+    final identity = MemorySccTokenStore();
+    final session = MemorySccTokenStore();
+    final seen = <String>[];
+    var failNext = true;
+    final client = SccPocketBaseClient(baseUrl: 'https://creator-api.indexesstore.com',
+      tokenStore: session, guestStore: identity,
+      httpClient: MockClient((req) async {
+        expect(req.url.path, '/api/scc/guest/session');
+        expect(req.headers.containsKey('authorization'), isFalse);
+        final secret = jsonDecode(req.body)['deviceSecret'] as String;
+        expect(identity.token, secret); // persisted before network I/O
+        seen.add(secret);
+        if (failNext) { failNext = false; throw http.ClientException('offline'); }
+        return http.Response(jsonEncode({'token': 'guest-token', 'record': {
+          'id': 'guest-one', 'email': '', 'collectionName': 'users'
+        }}), 200);
+      }));
+    addTearDown(client.close);
+    await expectLater(client.startGuestSession(), throwsA(isA<http.ClientException>()));
+    final attempts = await Future.wait([client.startGuestSession(), client.startGuestSession()]);
+    expect(attempts.map((user) => user.id), everyElement('guest-one'));
+    expect(seen.length, 2);
+    expect(seen.toSet().length, 1);
+    expect(seen.first, hasLength(43));
+    expect(session.token, 'guest-token');
+  });
+
+  test('invalid guest response cannot store an administrator token', () async {
+    final session = MemorySccTokenStore();
+    final client = SccPocketBaseClient(baseUrl: 'https://creator-api.indexesstore.com',
+      tokenStore: session, guestStore: MemorySccTokenStore(),
+      httpClient: MockClient((req) async => http.Response(jsonEncode({
+        'token': 'admin-token', 'record': {'id': 'admin', 'collectionName': '_superusers'}
+      }), 200)));
+    addTearDown(client.close);
+    await expectLater(client.startGuestSession(), throwsFormatException);
+    expect(session.token, isNull);
+  });
+
   test('Google OAuth uses PKCE, validates state and saves a normal user', () async {
     final store = MemorySccTokenStore();
     String? verifier;

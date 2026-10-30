@@ -11,7 +11,9 @@ import 'services/pocketbase/scc_google_auth.dart';
 //// It intentionally doesn't instantiate legacy Firebase/Firestore services.
 /// Only enable with --dart-define=SCC_POCKETBASE_URL=https://creator-api.indexesstore.com
 class SccPocketBaseApp extends StatefulWidget {
-  const SccPocketBaseApp({super.key, this.client});
+  const SccPocketBaseApp({super.key, this.client, this.guestMode = false});
+
+  final bool guestMode;
 
   /// Inject an HTTP-mocked client in widget tests.
   final SccPocketBaseClient? client;
@@ -38,6 +40,7 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
   SccAiResponse? _aiResult;
   String _aiMode = 'chat';
   bool _restoring = true;
+  String? _startupError;
   bool _busy = false;
   bool _loading = false;
   int _tab = 0;
@@ -96,17 +99,25 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
   }
 
   Future<void> _restore() async {
+    if (mounted) setState(() { _restoring = true; _startupError = null; });
     try {
-      final session = await _api.refreshSession();
+      final session = widget.guestMode
+          ? await _api.startGuestSession() : await _api.refreshSession();
       if (!mounted) return;
       setState(() => _user = session);
       await _reloadProducts();
     } on SccApiException catch (e) {
+      if (widget.guestMode) {
+        _startupError = e.statusCode == 503 || e.statusCode == 404
+            ? 'الدخول المباشر غير متاح على الخادم حاليًا.'
+            : _errorMessage(e);
+      }
       if (e.statusCode == 401 || e.statusCode == 403 || e.statusCode == 404) {
         await _api.signOut();
       }
     } catch (_) {
-      // If the network is temporarily unavailable, do not erase the saved token.
+      // Preserve the device secret on every failure; never silently create a new account.
+      _startupError = 'تعذر الاتصال. تحقق من الإنترنت ثم أعد المحاولة.';
     } finally {
       if (mounted) setState(() => _restoring = false);
     }
@@ -431,6 +442,19 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
       if (mounted) setState(() => _busy = false);
     }
   }
+
+  Widget _guestRetryView() => Scaffold(
+    appBar: AppBar(title: const Text('Smart Content Creator')),
+    body: Center(child: Padding(padding: const EdgeInsets.all(24), child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(_startupError ?? 'تعذر فتح مساحتك الخاصة.', textAlign: TextAlign.center),
+        const SizedBox(height: 16),
+        FilledButton(onPressed: _restore, key: const Key('scc-guest-retry'),
+          child: const Text('إعادة المحاولة')),
+      ],
+    ))),
+  );
 
   Widget _loginView() {
     return Scaffold(
@@ -846,9 +870,13 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
           children: [
             const CircleAvatar(radius: 30, child: Icon(Icons.person_outline)),
             const SizedBox(height: 12),
-            Text(_user?.email ?? ''),
+            Text(widget.guestMode ? 'مساحتك الخاصة على هذا الجهاز' : (_user?.email ?? '')),
+            if (widget.guestMode) const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text('تُحفظ بياناتك على الخادم. احتفظ بالتطبيق وبياناته؛ حذف بيانات التطبيق قد يفقدك الوصول إلى هذه المساحة.'),
+            ),
             const SizedBox(height: 20),
-            OutlinedButton.icon(
+            if (!widget.guestMode) OutlinedButton.icon(
               key: const Key('scc-signout'),
               onPressed: _busy ? null : _signOut,
               icon: const Icon(Icons.logout),
@@ -958,7 +986,7 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
         textDirection: TextDirection.rtl,
         child: _restoring
             ? const Scaffold(body: Center(child: CircularProgressIndicator()))
-            : (_user == null ? _loginView() : _workspace()),
+            : (_user == null ? (widget.guestMode ? _guestRetryView() : _loginView()) : _workspace()),
       ),
     );
   }

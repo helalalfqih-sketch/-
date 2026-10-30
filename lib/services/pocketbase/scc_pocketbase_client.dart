@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
@@ -15,9 +16,12 @@ abstract class SccTokenStore {
 
 class SccSecureTokenStore implements SccTokenStore {
   SccSecureTokenStore([FlutterSecureStorage? storage])
-      : _storage = storage ?? const FlutterSecureStorage();
+      : _storage = storage ?? const FlutterSecureStorage(),
+        _key = 'scc_pocketbase_user_token';
 
-  static const _key = 'scc_pocketbase_user_token';
+  SccSecureTokenStore.withKey(this._key) : _storage = const FlutterSecureStorage();
+
+  final String _key;
   final FlutterSecureStorage _storage;
 
   @override
@@ -204,9 +208,11 @@ class SccPocketBaseClient {
     required String baseUrl,
     http.Client? httpClient,
     SccTokenStore? tokenStore,
+    SccTokenStore? guestStore,
   })  : _baseUrl = _validateBaseUrl(baseUrl),
         _http = httpClient ?? http.Client(),
-        _store = tokenStore ?? SccSecureTokenStore();
+        _store = tokenStore ?? SccSecureTokenStore(),
+        _guestStore = guestStore ?? SccSecureTokenStore.withKey('scc_guest_device_secret_v1');
 
   static const configuredUrl =
       String.fromEnvironment('SCC_POCKETBASE_URL', defaultValue: '');
@@ -214,6 +220,8 @@ class SccPocketBaseClient {
   final Uri _baseUrl;
   final http.Client _http;
   final SccTokenStore _store;
+  final SccTokenStore _guestStore;
+  Future<SccUserSession>? _guestRequest;
   String? _currentUserId;
 
   static Uri _validateBaseUrl(String input) {
@@ -275,6 +283,36 @@ class SccPocketBaseClient {
       throw SccApiException(output.statusCode, 'PocketBase request failed');
     }
     return _jsonMap(output.body);
+  }
+
+  // Retry reuses the same identity, including after a lost server response.
+  Future<SccUserSession> startGuestSession() =>
+      _guestRequest ??= _startGuestSession().whenComplete(() => _guestRequest = null);
+
+  Future<SccUserSession> _startGuestSession() async {
+    var secret = await _guestStore.read();
+    if (secret == null) {
+      final random = Random.secure();
+      secret = base64UrlEncode(List<int>.generate(32, (_) => random.nextInt(256)))
+          .replaceAll('=', '');
+      await _guestStore.write(secret);
+    }
+    if (!RegExp(r'^[A-Za-z0-9_-]{43}$').hasMatch(secret)) {
+      throw const FormatException('Invalid stored device identity');
+    }
+    final result = await _request('POST', '/api/scc/guest/session',
+      requiresAuth: false, body: {'deviceSecret': secret},
+    ).timeout(const Duration(seconds: 30));
+    final token = result['token'];
+    final record = result['record'];
+    if (token is! String || token.isEmpty || record is! Map<String, dynamic> ||
+        record['collectionName'] != 'users') {
+      throw const FormatException('Invalid guest session');
+    }
+    final user = SccUserSession.fromJson(record);
+    await _store.write(token);
+    _currentUserId = user.id;
+    return user;
   }
 
   Future<SccUserSession> signIn(String email, String password) async {
