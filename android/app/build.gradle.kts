@@ -78,7 +78,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = if (hasKeystore) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
+            // Do not silently sign a release with the Android debug key.
+            // An unsigned build is NOT a publishable APK/AAB.
+            signingConfig = if (hasKeystore) signingConfigs.getByName("release") else null
         }
 
         debug {
