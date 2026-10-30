@@ -21,6 +21,8 @@ jobs:
         run: |
           python3 -m py_compile deploy/vpsdime-scc/verify_release_zip.py deploy/vpsdime-scc/test_access_policy.py deploy/vpsdime-scc/provision_normal_user.py
           bash -n deploy/vpsdime-scc/apply_production_schema.sh
+          bash -n deploy/vpsdime-scc/configure_ai_provider.sh deploy/vpsdime-scc/deploy_ai_gateway.sh
+          node --check deploy/vpsdime-scc/pb_hooks/scc_ai.pb.js
           echo 'bc9663838bf94bb4a731aa575703f073a4a3795fbe2e53932e4197a85aa5b7e9  deploy/vpsdime-scc/pb_migrations/1793305000_scc_schema_v1.js' | sha256sum -c -
           python3 -m json.tool deploy/vpsdime-scc/schema-contract.json > /dev/null
       - name: Parse Docker Compose without building or starting
@@ -52,6 +54,10 @@ jobs:
           assert not p.get('ports')
           assert p['read_only'] and 'ALL' in p['cap_drop']
           assert '--automigrate=false' in p['entrypoint']
+          assert '--hooksDir=/pb_hooks' in p['entrypoint']
+          assert any(x['target']=='/pb_hooks' and x['read_only'] for x in p['volumes'])
+          assert any(x.get('path')=='/opt/scc-production/ai.env' for x in p.get('env_file',[])) if isinstance(p.get('env_file'), list) and p['env_file'] and isinstance(p['env_file'][0],dict) else True
+
           assert any(x['source']=='/opt/scc-production/pb_migrations' and x['target']=='/pb_migrations' and x['read_only'] for x in p['volumes'])
           assert c['networks']['wa']['external'] is True
           print('Root-owned runtime manifest: OK (NO DEPLOYMENT)')
