@@ -103,6 +103,20 @@ routerAdd("POST", "/api/scc/ai/text", (e) => {
     "لا تختلق حقائق أو أسعارًا أو نتائج أو مواصفات أو مبيعات. " +
     "لا تتظاهر بالنشر أو الدفع أو إنشاء طلب. " + directions[mode];
 
+  const payload = {
+    model: model,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: prompt }
+    ],
+    max_completion_tokens: 1000
+  };
+  // Luna supports none: reserve the bounded budget for visible short-form output.
+  // Other configured models keep their default reasoning behavior.
+  if (model === "gpt-6-luna" || model.indexOf("gpt-6-luna-") === 0) {
+    payload.reasoning_effort = "none";
+  }
+
   let resultText = "";
   let failed = false;
   try {
@@ -114,15 +128,7 @@ routerAdd("POST", "/api/scc/ai/text", (e) => {
         "Authorization": "Bearer " + key
       },
       timeout: 30,
-      body: JSON.stringify({
-        model: model,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: prompt }
-        ],
-        max_tokens: 1000,
-        temperature: 0.5
-      })
+      body: JSON.stringify(payload)
     });
     if (response.statusCode < 200 || response.statusCode >= 300) {
       failed = true;
