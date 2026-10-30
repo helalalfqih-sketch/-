@@ -22,6 +22,7 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
   late final SccPocketBaseClient _api;
   final _email = TextEditingController();
   final _password = TextEditingController();
+  final _aiPrompt = TextEditingController();
   final _loginKey = GlobalKey<FormState>();
   final _navigatorKey = GlobalKey<NavigatorState>();
   final _messengerKey = GlobalKey<ScaffoldMessengerState>();
@@ -29,6 +30,8 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
   List<SccProduct> _products = const [];
   List<SccContentItem> _content = const [];
   List<SccMediaAsset> _media = const [];
+  SccAiResponse? _aiResult;
+  String _aiMode = 'chat';
   bool _restoring = true;
   bool _busy = false;
   bool _loading = false;
@@ -49,6 +52,7 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
   void dispose() {
     _email.dispose();
     _password.dispose();
+    _aiPrompt.dispose();
     if (widget.client == null) {
       _api.close();
     }
@@ -68,7 +72,11 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
         case 404:
           return 'السجل غير موجود أو لا تملك صلاحية الوصول إليه.';
         case 429:
-          return 'تم تجاوز عدد الطلبات. حاول لاحقًا.';
+          return 'اكتمل حد الاستخدام أو يوجد طلب آخر قيد التنفيذ.';
+        case 502:
+          return 'تعذر الحصول على استجابة من مزود الذكاء الاصطناعي.';
+        case 503:
+          return 'خدمة الذكاء الاصطناعي غير مهيأة أو غير متاحة حاليًا.';
       }
     }
     return 'تعذر الاتصال بالخدمة. تحقق من الشبكة وحاول مجددًا.';
@@ -125,6 +133,8 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
       _products = const [];
       _content = const [];
       _media = const [];
+      _aiResult = null;
+      _aiPrompt.clear();
       _page = 1;
       _hasMore = false;
       _tab = 0;
@@ -630,6 +640,154 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
     );
   }
 
+  Future<void> _generateAiContent() async {
+    if (_busy) return;
+    final prompt = _aiPrompt.text.trim();
+    if (prompt.isEmpty || prompt.length > 6000) {
+      _notice('أدخل طلبًا واضحًا لا يتجاوز 6000 حرف.');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _aiResult = null;
+    });
+    try {
+      final output = await _api.generateText(
+        prompt: prompt,
+        mode: _aiMode,
+      );
+      if (!mounted) return;
+      setState(() => _aiResult = output);
+    } catch (error) {
+      _notice(_errorMessage(error));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _saveAiAsDraft() async {
+    final result = _aiResult;
+    if (_busy || result == null || result.text.isEmpty) return;
+    const labels = <String, String>{
+      'chat': 'رد',
+      'description': 'وصف منتج',
+      'hashtags': 'وسوم',
+      'ad': 'إعلان',
+      'script': 'سيناريو',
+      'plan': 'خطة محتوى',
+    };
+    final currentPrompt = _aiPrompt.text.trim();
+    final title = (labels[result.mode] ?? 'محتوى') + ' — ' +
+        currentPrompt.substring(0, currentPrompt.length > 80 ? 80 : currentPrompt.length);
+    setState(() => _busy = true);
+    try {
+      await _api.saveContentDraft(
+        title: title,
+        body: result.text,
+        format: result.mode == 'ad' ? 'ad' :
+            result.mode == 'script' ? 'reel' : 'post',
+      );
+      _notice('حُفظ الناتج كمسودة خاصة، دون نشر.');
+    } catch (error) {
+      _notice(_errorMessage(error));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Widget _aiView() {
+    const modes = <String, String>{
+      'chat': 'مساعد كتابة',
+      'description': 'وصف منتج',
+      'hashtags': 'وسوم',
+      'ad': 'إعلان تسويقي',
+      'script': 'سيناريو فيديو',
+      'plan': 'خطة محتوى',
+    };
+    return ListView(
+      key: const Key('scc-ai-workspace'),
+      padding: const EdgeInsets.all(16),
+      children: [
+        const Text(
+          'إنشاء محتوى بالذكاء الاصطناعي',
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'يتم توليد النص من مزوّد حقيقي عبر خادمك وبصلاحيات حسابك. '
+          'لا ننشر المحتوى أو نغيّر المنتجات تلقائيًا.',
+        ),
+        const SizedBox(height: 18),
+        DropdownButtonFormField<String>(
+          key: const Key('scc-ai-mode'),
+          initialValue: _aiMode,
+          decoration: const InputDecoration(
+            labelText: 'نوع المحتوى',
+            border: OutlineInputBorder(),
+          ),
+          items: [
+            for (final entry in modes.entries)
+              DropdownMenuItem(value: entry.key, child: Text(entry.value)),
+          ],
+          onChanged: _busy ? null : (mode) {
+            if (mode != null) setState(() => _aiMode = mode);
+          },
+        ),
+        const SizedBox(height: 14),
+        TextField(
+          key: const Key('scc-ai-prompt'),
+          controller: _aiPrompt,
+          enabled: !_busy,
+          minLines: 4,
+          maxLines: 8,
+          maxLength: 6000,
+          textInputAction: TextInputAction.newline,
+          decoration: const InputDecoration(
+            labelText: 'اشرح المطلوب أو معلومات المنتج',
+            hintText: 'مثال: اكتب وصفًا لهذه الطابعة، باستخدام معلوماتها الصحيحة فقط...',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: 12),
+        FilledButton.icon(
+          key: const Key('scc-ai-generate'),
+          onPressed: _busy ? null : _generateAiContent,
+          icon: const Icon(Icons.auto_awesome),
+          label: Text(_busy ? 'جارٍ توليد المحتوى...' : 'إنشاء المحتوى'),
+        ),
+        if (_busy) ...[
+          const SizedBox(height: 18),
+          const LinearProgressIndicator(),
+        ],
+        if (_aiResult != null) ...[
+          const SizedBox(height: 24),
+          const Text(
+            'المحتوى الناتج',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 10),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: SelectableText(
+                _aiResult!.text,
+                key: const Key('scc-ai-output'),
+                textDirection: TextDirection.rtl,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            key: const Key('scc-ai-save-draft'),
+            onPressed: _busy ? null : _saveAiAsDraft,
+            icon: const Icon(Icons.save_outlined),
+            label: const Text('حفظ الناتج كمسودة خاصة'),
+          ),
+        ],
+      ],
+    );
+  }
+
   Widget _profileView() {
     return Center(
       child: Padding(
@@ -654,7 +812,7 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
   }
 
   Widget _workspace() {
-    const titles = ['منتجاتي', 'مسودات المحتوى', 'الوسائط الخاصة', 'الحساب'];
+    const titles = ['منتجاتي', 'مسودات المحتوى', 'الوسائط الخاصة', 'الذكاء الاصطناعي', 'الحساب'];
     final VoidCallback? refresh = _tab == 0
         ? _reloadProducts
         : _tab == 1
@@ -680,10 +838,11 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
           _productsView(),
           _contentView(),
           _mediaView(),
+          _aiView(),
           _profileView(),
         ],
       ),
-      floatingActionButton: _tab == 3
+      floatingActionButton: _tab >= 3
           ? null
           : FloatingActionButton.extended(
               key: Key(_tab == 0
@@ -720,6 +879,10 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
           NavigationDestination(
             icon: Icon(Icons.perm_media_outlined),
             label: 'الوسائط',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.auto_awesome),
+            label: 'AI',
           ),
           NavigationDestination(
             icon: Icon(Icons.person_outline),
