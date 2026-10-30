@@ -105,6 +105,10 @@ void main() {
     await tester.pumpWidget(SccPocketBaseApp(client: client));
     await tester.pumpAndSettle();
 
+    expect(find.byKey(const Key('scc-login-google')), findsOneWidget);
+    expect(find.byKey(const Key('scc-login-email')), findsNothing);
+    await tester.tap(find.byKey(const Key('scc-login-password-option')));
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('scc-login-email')), findsOneWidget);
     expect(find.text('إضافة منتج'), findsNothing);
     await tester.enterText(
@@ -164,3 +168,4 @@ void main() {
     expect(requests, contains('POST /api/collections/content_items/records'));
   });
 }
+

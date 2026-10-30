@@ -14,6 +14,62 @@ class MemorySccTokenStore implements SccTokenStore {
 }
 
 void main() {
+  test('Google OAuth uses PKCE, validates state and saves a normal user', () async {
+    final store = MemorySccTokenStore();
+    String? verifier;
+    final client = SccPocketBaseClient(
+      baseUrl: 'https://creator-api.indexesstore.com', tokenStore: store,
+      httpClient: MockClient((req) async {
+        expect(req.headers.containsKey('authorization'), isFalse);
+        if (req.url.path.endsWith('/auth-methods')) {
+          return http.Response(jsonEncode({'oauth2': {'enabled': true, 'providers': [
+            {'name': 'google', 'authURL': 'https://accounts.google.com/o/oauth2/auth?client_id=test&redirect_uri='}
+          ]}}), 200);
+        }
+        expect(req.url.path, '/api/collections/users/auth-with-oauth2');
+        final body = jsonDecode(req.body) as Map<String, dynamic>;
+        expect(body['codeVerifier'], verifier);
+        expect(body['provider'], 'google');
+        expect(body['redirectUrl'], 'https://creator-api.indexesstore.com/api/scc/oauth/google/callback');
+        return http.Response(jsonEncode({'token': 'normal-token', 'record': {
+          'id': 'normal-user', 'email': 'user@example.invalid', 'collectionName': 'users'
+        }}), 200);
+      }),
+    );
+    addTearDown(client.close);
+    final request = await client.beginGoogleSignIn();
+    verifier = request.codeVerifier;
+    expect(request.authorizationUrl.queryParameters['code_challenge_method'], 'S256');
+    expect(request.authorizationUrl.queryParameters['code_challenge'], hasLength(43));
+    expect(request.authorizationUrl.queryParameters['code_challenge'], isNot(verifier));
+    expect(request.state, hasLength(43));
+    final callback = Uri.parse('com.indexes.scc://oauth/google?code=test-code&state=${request.state}');
+    final user = await client.finishGoogleSignIn(request, callback);
+    expect(user.id, 'normal-user');
+    expect(store.token, 'normal-token');
+    await expectLater(client.finishGoogleSignIn(request, callback), throwsStateError);
+  });
+
+  test('OAuth rejects wrong state, duplicates, expired and cancelled requests', () {
+    SccGoogleAuthRequest transaction({DateTime? createdAt}) => SccGoogleAuthRequest(
+      authorizationUrl: Uri.parse('https://accounts.google.com/o/oauth2/auth'),
+      redirectUrl: 'https://creator-api.indexesstore.com/api/scc/oauth/google/callback',
+      state: 'expected', codeVerifier: 'verifier', createdAt: createdAt,
+    );
+    for (final callback in [
+      'com.indexes.scc://oauth/google?state=wrong&code=x',
+      'com.indexes.scc://oauth/google?state=expected&state=expected&code=x',
+      'com.indexes.scc://oauth/google?state=expected&code=x&code=y',
+      'https://attacker.invalid/oauth/google?state=expected&code=x',
+    ]) {
+      expect(() => transaction().consumeCode(Uri.parse(callback)), throwsFormatException);
+    }
+    final valid = Uri.parse('com.indexes.scc://oauth/google?state=expected&code=x');
+    expect(() => transaction(createdAt: DateTime.now().subtract(const Duration(minutes: 11))).consumeCode(valid), throwsFormatException);
+    final cancelled = transaction()..cancel();
+    expect(() => cancelled.consumeCode(valid), throwsStateError);
+  });
+
   test('rejects non-HTTPS remote servers', () {
     expect(
       () => SccPocketBaseClient(
@@ -295,3 +351,4 @@ void main() {
   });
 
 }
+

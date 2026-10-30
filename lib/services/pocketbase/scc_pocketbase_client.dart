@@ -1,4 +1,7 @@
 import 'dart:convert';
+import 'dart:math';
+
+import 'package:crypto/crypto.dart';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
@@ -148,6 +151,51 @@ class SccAiResponse {
       );
 }
 
+/// One-use OAuth transaction; verifier never leaves the app except at exchange.
+class SccGoogleAuthRequest {
+  SccGoogleAuthRequest({
+    required this.authorizationUrl,
+    required this.redirectUrl,
+    required this.state,
+    required this.codeVerifier,
+    DateTime? createdAt,
+  }) : createdAt = createdAt ?? DateTime.now();
+
+  final Uri authorizationUrl;
+  final String redirectUrl;
+  final String state;
+  final String codeVerifier;
+  final DateTime createdAt;
+  bool _consumed = false;
+
+  static bool isCallback(Uri uri) =>
+      uri.scheme == 'com.indexes.scc' && uri.host == 'oauth' &&
+      uri.path == '/google' && uri.userInfo.isEmpty && !uri.hasPort &&
+      !uri.hasFragment;
+
+  void cancel() => _consumed = true;
+
+  String consumeCode(Uri callback) {
+    if (_consumed) throw StateError('OAuth transaction already consumed');
+    _consumed = true;
+    if (DateTime.now().difference(createdAt) > const Duration(minutes: 10) ||
+        !isCallback(callback) ||
+        callback.queryParametersAll['state']?.length != 1 ||
+        callback.queryParameters['state'] != state) {
+      throw const FormatException('Invalid or expired OAuth state');
+    }
+    if (callback.queryParameters.containsKey('error')) {
+      throw const SccApiException(400, 'Google authorization cancelled');
+    }
+    final code = callback.queryParameters['code'];
+    if (code == null || code.isEmpty || code.length > 8192 ||
+        callback.queryParametersAll['code']?.length != 1) {
+      throw const FormatException('Missing OAuth authorization code');
+    }
+    return code;
+  }
+}
+
 /// An opt-in PocketBase client for Smart Content Creator.
 /// Disabled until SCC_POCKETBASE_URL is supplied at build time.
 /// Uses normal user accounts, never a PocketBase superuser credential.
@@ -246,6 +294,77 @@ class SccPocketBaseClient {
     final user = SccUserSession.fromJson(record);
     _currentUserId = user.id;
     await _store.write(token);
+    return user;
+  }
+
+  Future<SccGoogleAuthRequest> beginGoogleSignIn() async {
+    final methods = await _request(
+      'GET', '/api/collections/users/auth-methods', requiresAuth: false,
+    );
+    final oauth = methods['oauth2'];
+    if (oauth is! Map || oauth['enabled'] != true || oauth['providers'] is! List) {
+      throw const SccApiException(503, 'google_not_configured');
+    }
+    Map? provider;
+    for (final item in oauth['providers'] as List) {
+      if (item is Map && item['name'] == 'google') provider = item;
+    }
+    final rawUrl = provider?['authURL'];
+    final url = rawUrl is String ? Uri.tryParse(rawUrl) : null;
+    if (url == null || url.scheme != 'https' || url.host != 'accounts.google.com' ||
+        url.userInfo.isNotEmpty || url.hasFragment ||
+        (url.hasPort && url.port != 443)) {
+      throw const SccApiException(503, 'google_not_configured');
+    }
+    final random = Random.secure();
+    String secret() => base64UrlEncode(
+      List<int>.generate(32, (_) => random.nextInt(256)),
+    ).replaceAll('=', '');
+    final state = secret();
+    final verifier = secret();
+    final challenge = base64UrlEncode(sha256.convert(ascii.encode(verifier)).bytes)
+        .replaceAll('=', '');
+    final redirect = _uri('/api/scc/oauth/google/callback').toString();
+    return SccGoogleAuthRequest(
+      authorizationUrl: url.replace(queryParameters: {
+        ...url.queryParameters,
+        'state': state,
+        'code_challenge': challenge,
+        'code_challenge_method': 'S256',
+        'redirect_uri': redirect,
+        'response_type': 'code',
+        'scope': 'openid email profile',
+        'prompt': 'select_account',
+      }),
+      redirectUrl: redirect,
+      state: state,
+      codeVerifier: verifier,
+    );
+  }
+
+  Future<SccUserSession> finishGoogleSignIn(
+    SccGoogleAuthRequest request, Uri callback,
+  ) async {
+    final code = request.consumeCode(callback);
+    final result = await _request(
+      'POST', '/api/collections/users/auth-with-oauth2',
+      requiresAuth: false,
+      body: {
+        'provider': 'google', 'code': code,
+        'codeVerifier': request.codeVerifier,
+        'redirectUrl': request.redirectUrl,
+        'createData': {'emailVisibility': false},
+      },
+    );
+    final token = result['token'];
+    final record = result['record'];
+    if (token is! String || token.isEmpty || record is! Map<String, dynamic> ||
+        record['collectionName'] != 'users') {
+      throw const FormatException('Invalid normal-user OAuth response');
+    }
+    final user = SccUserSession.fromJson(record);
+    await _store.write(token);
+    _currentUserId = user.id;
     return user;
   }
 
@@ -549,3 +668,4 @@ class SccPocketBaseClient {
 
   void close() => _http.close();
 }
+

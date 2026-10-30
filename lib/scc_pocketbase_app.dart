@@ -1,9 +1,11 @@
 import 'dart:typed_data';
+import 'dart:async';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import 'services/pocketbase/scc_pocketbase_client.dart';
+import 'services/pocketbase/scc_google_auth.dart';
 
 /// An explicit PocketBase-backed entry point for the VPS release.
 //// It intentionally doesn't instantiate legacy Firebase/Firestore services.
@@ -20,6 +22,9 @@ class SccPocketBaseApp extends StatefulWidget {
 
 class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
   late final SccPocketBaseClient _api;
+  final _googleAuth = SccGoogleAuth();
+  bool _googlePending = false;
+  bool _showPasswordLogin = false;
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _aiPrompt = TextEditingController();
@@ -50,6 +55,7 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
 
   @override
   void dispose() {
+    _googleAuth.cancel();
     _email.dispose();
     _password.dispose();
     _aiPrompt.dispose();
@@ -122,6 +128,30 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
       _notice(_errorMessage(e));
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _loginWithGoogle() async {
+    if (_busy) return;
+    setState(() { _busy = true; _googlePending = true; });
+    try {
+      final session = await _googleAuth.signIn(_api);
+      if (!mounted) return;
+      _password.clear();
+      setState(() { _user = session; _tab = 0; });
+      await _reloadProducts();
+    } on SccGoogleAuthCancelled {
+      // User intentionally returned without completing Google sign-in.
+    } on TimeoutException {
+      _notice('انتهت مهلة الدخول. اضغط الدخول باستخدام Google للمحاولة مجددًا.');
+    } on SccApiException catch (error) {
+      _notice(error.message == 'google_not_configured'
+          ? 'الدخول باستخدام Google لم يُفعّل على الخادم بعد.'
+          : 'لم يكتمل الدخول باستخدام Google. حاول مجددًا.');
+    } catch (_) {
+      _notice('تعذر إكمال الدخول باستخدام Google. حاول مجددًا.');
+    } finally {
+      if (mounted) setState(() { _busy = false; _googlePending = false; });
     }
   }
 
@@ -427,6 +457,25 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
                         style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 20),
+                      FilledButton.icon(
+                        key: const Key('scc-login-google'),
+                        onPressed: _busy ? null : _loginWithGoogle,
+                        icon: const Icon(Icons.account_circle_outlined),
+                        label: const Text('الدخول باستخدام Google'),
+                      ),
+                      if (_googlePending)
+                        TextButton(
+                          onPressed: _googleAuth.cancel,
+                          child: const Text('إلغاء الدخول'),
+                        ),
+                      TextButton(
+                        key: const Key('scc-login-password-option'),
+                        onPressed: _busy ? null : () => setState(() {
+                          _showPasswordLogin = !_showPasswordLogin;
+                        }),
+                        child: const Text('الدخول بالبريد وكلمة المرور'),
+                      ),
+                      if (_showPasswordLogin) ...[
                       TextFormField(
                         key: const Key('scc-login-email'),
                         controller: _email,
@@ -461,10 +510,10 @@ class _SccPocketBaseAppState extends State<SccPocketBaseApp> {
                         icon: const Icon(Icons.login),
                         label: Text(_busy ? 'جارٍ الدخول...' : 'تسجيل الدخول'),
                       ),
+                      ],
                       const SizedBox(height: 10),
                       const Text(
-                        'التسجيل العام مغلق مؤقتًا. استخدم حساب مستخدم مُعتمَد؛ '
-                        'حساب مدير PocketBase ليس حساب دخول للتطبيق.',
+                        'استخدم حساب Google للدخول دون كلمة مرور جديدة.',
                         textAlign: TextAlign.center,
                         style: TextStyle(fontSize: 12),
                       ),
@@ -1131,3 +1180,4 @@ class _SccContentFormState extends State<_SccContentForm> {
     );
   }
 }
+
