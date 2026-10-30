@@ -130,6 +130,24 @@ class SccContentItem {
       );
 }
 
+class SccAiResponse {
+  const SccAiResponse({
+    required this.jobId,
+    required this.mode,
+    required this.text,
+  });
+
+  final String jobId;
+  final String mode;
+  final String text;
+
+  factory SccAiResponse.fromJson(Map<String, dynamic> source) => SccAiResponse(
+        jobId: source['jobId'] as String,
+        mode: source['mode'] as String,
+        text: source['text'] as String,
+      );
+}
+
 /// An opt-in PocketBase client for Smart Content Creator.
 /// Disabled until SCC_POCKETBASE_URL is supplied at build time.
 /// Uses normal user accounts, never a PocketBase superuser credential.
@@ -290,6 +308,29 @@ class SccPocketBaseClient {
     return SccProduct.fromJson(data);
   }
 
+
+  /// Calls the real authenticated server-side AI provider.
+  /// Never includes a provider API key in the app or HTTP request body.
+  Future<SccAiResponse> generateText({
+    required String prompt,
+    String mode = 'chat',
+  }) async {
+    const supported = [
+      'chat', 'description', 'hashtags', 'ad', 'script', 'plan',
+    ];
+    if (prompt.trim().isEmpty || prompt.length > 6000) {
+      throw ArgumentError('Prompt length must be between 1 and 6000.');
+    }
+    if (!supported.contains(mode)) {
+      throw ArgumentError.value(mode, 'mode', 'Unsupported AI mode');
+    }
+    final value = await _request(
+      'POST',
+      '/api/scc/ai/text',
+      body: {'mode': mode, 'prompt': prompt.trim()},
+    );
+    return SccAiResponse.fromJson(value);
+  }
 
   Future<SccProduct> updateProduct({
     required String id,
