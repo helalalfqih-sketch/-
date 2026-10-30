@@ -20,7 +20,9 @@ jobs:
       - name: Verify artifact tooling syntax
         run: |
           python3 -m py_compile deploy/vpsdime-scc/verify_release_zip.py deploy/vpsdime-scc/test_access_policy.py deploy/vpsdime-scc/provision_normal_user.py
-          bash -n deploy/vpsdime-scc/apply_production_schema.sh
+          bash -n deploy/vpsdime-scc/apply_production_schema.sh deploy/vpsdime-scc/deploy_guest_trial.sh
+          python3 -m py_compile deploy/vpsdime-scc/test_guest_access.py
+          node --check deploy/vpsdime-scc/pb_hooks/scc_guest.pb.js
           bash -n deploy/vpsdime-scc/configure_ai_provider.sh deploy/vpsdime-scc/deploy_ai_gateway.sh
           node --check deploy/vpsdime-scc/pb_hooks/scc_ai.pb.js
           echo 'bc9663838bf94bb4a731aa575703f073a4a3795fbe2e53932e4197a85aa5b7e9  deploy/vpsdime-scc/pb_migrations/1793305000_scc_schema_v1.js' | sha256sum -c -

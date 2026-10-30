@@ -64,7 +64,9 @@ jobs:
           signer="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
           test -n "$signer"
           for apk in build/app/outputs/flutter-apk/app-*-release.apk; do
-            "$signer" verify --verbose "$apk"
+            "$signer" verify --verbose --print-certs "$apk"
+            aapt="$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -n 1)"
+            "$aapt" dump badging "$apk" | sed -n '1p'
           done
       - name: Record source revision
         run: |
