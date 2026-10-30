@@ -31,9 +31,16 @@ jobs:
         run: flutter pub get
       - name: Verify PocketBase login and catalog UI
         run: flutter test test/services/scc_pocketbase_client_test.dart test/widgets/scc_pocketbase_app_test.dart
+      - name: Prepare explicit private device-test signing
+        run: |
+          keytool -genkeypair -keystore "$RUNNER_TEMP/scc-private-test.jks" \
+            -storepass android -keypass android -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 30 \
+            -dname "CN=SCC Private Device Test,O=Indexes,C=YE"
+          printf 'storeFile=%s\nstorePassword=android\nkeyPassword=android\nkeyAlias=androiddebugkey\n' "$RUNNER_TEMP/scc-private-test.jks" > android/key.properties
       - name: Compile ABI-split private test APKs (not store-signed)
         run: |
-          flutter build apk --release --split-per-abi \
+          flutter build apk --release --split-per-abi -t lib/main_scc_release.dart \
             --target-platform android-arm64,android-x64 \
             --dart-define=SCC_POCKETBASE_URL=https://creator-api.indexesstore.com
         env:
@@ -52,13 +59,24 @@ jobs:
             print(f'{file.name} {file.stat().st_size} bytes sha256={digest}')
             assert file.stat().st_size < 300 * 1024 * 1024, 'Too large for Android cloud testing'
           PY
+      - name: Verify APK signatures
+        run: |
+          signer="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)"
+          test -n "$signer"
+          for apk in build/app/outputs/flutter-apk/app-*-release.apk; do
+            "$signer" verify --verbose "$apk"
+          done
+      - name: Record source revision
+        run: |
+          printf '%s\n' "$GITHUB_SHA" > build/app/outputs/flutter-apk/SOURCE_COMMIT.txt
       - name: Upload APKs for PRIVATE testing only
         uses: actions/upload-artifact@v4
         with:
-          name: scc-pocketbase-optimized-test-apks
-          path: build/app/outputs/flutter-apk/app-*-release.apk
+          name: scc-ai-device-apks-${{ github.sha }}
+          path: |
+            build/app/outputs/flutter-apk/app-*-release.apk
+            build/app/outputs/flutter-apk/SOURCE_COMMIT.txt
           if-no-files-found: error
           retention-days: 5
 
-# Gradle currently defaults release signing to Android debug key when no private
-# store signing material is provided. These APKs MUST NOT be published.
+# Explicit disposable private-test signing only. These APKs MUST NOT be published.
